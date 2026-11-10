@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configs>
+	<append xpath="/items">
+		<item name="toolPhysicsStaff" extends="meleeToolStoneAxe">
+			<property name="Material" value="Mstone"/>
+			<property name="Meshfile" value="@:Other/Items/Weapons/Melee/Axe/stone_axePrefab.prefab"/>
+			<property name="CreativeMode" value="All"/>
+			<property name="Group" value="Tools"/>
+			<property name="SortOrder1" value="9998"/>
+			<property name="DescriptionKey" value="toolPhysicsStaffDesc"/>
+			<property name="CustomIcon" value="meleeToolStoneAxe"/>
+			<property name="Action0" value="Activate"/>
+			<property name="Action1" value="Activate"/>
+		</item>
+	</append>
+</configs>
