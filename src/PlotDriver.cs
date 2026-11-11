@@ -177,6 +177,7 @@ namespace SubLevelPhysics
 			if (PlotSpace.Current == Plot && Time.realtimeSinceStartup >= nextPersist) { nextPersist = Time.realtimeSinceStartup + 5f; PlotSpace.SaveState(); }
 			if (Colliders != null) Colliders.Tick(PhysicsEnabled, rb);
 			TickRestore();
+			TickGroundHold();
 			Watchdog();
 		}
 
@@ -332,6 +333,55 @@ namespace SubLevelPhysics
 			Log.Out("[SubLevel] " + Plot.Id + " restore complete after " + (Time.realtimeSinceStartup - pendingSince).ToString("F1") + " s" +
 				(timedOut ? " (TIMED OUT waiting for chunks/ground)" : "") + (PendingPhysics ? ": " + result : "."));
 			PlotSpace.SaveState();
+		}
+
+		// --- ground hold --------------------------------------------------------------------------------------------------
+		// A dynamic sublevel keeps simulating when nobody is near it, but the server unloads the terrain there (and with it
+		// the collision). Multiplayer rig mp3 (11-11): a dropped sublevel left alone while its player was away fell to
+		// y -4760. So while any terrain chunk under the footprint is missing or has no collision, the body is frozen
+		// (kinematic, velocities kept) and resumes as soon as the ground is back - as vanilla entities do in unloaded areas.
+		public bool GroundHeld { get; private set; }
+		private Vector3 heldVelocity, heldAngular;
+		private float nextGroundCheck;
+
+		private void TickGroundHold()
+		{
+			if (!PhysicsEnabled || RestorePending || rb == null || Plot == null) { GroundHeld = false; return; }
+			if (Time.time < nextGroundCheck) return;
+			nextGroundCheck = Time.time + 0.25f;
+			bool ready = GroundReady();
+			if (!ready && !GroundHeld)
+			{
+				heldVelocity = rb.velocity; heldAngular = rb.angularVelocity;
+				rb.isKinematic = true;
+				GroundHeld = true;
+				Log.Out("[SubLevel] " + Plot.Id + " ground not loaded under " + Pose + ": holding the body still until it is.");
+			}
+			else if (ready && GroundHeld)
+			{
+				rb.isKinematic = false;
+				rb.velocity = heldVelocity; rb.angularVelocity = heldAngular;
+				GroundHeld = false;
+				Log.Out("[SubLevel] " + Plot.Id + " ground is back under " + Pose + ": physics resumed.");
+			}
+		}
+
+		/// <summary>Every terrain chunk under the footprint (plus one ring) is loaded, has collision and is in the scene.</summary>
+		private bool GroundReady()
+		{
+			World world = GameManager.Instance != null ? GameManager.Instance.World : null;
+			ChunkCluster cc = world != null ? world.ChunkCache : null;
+			if (cc == null) return false;
+			int reach = (Plot.PlotRadius + 1) * 16;
+			int x0 = World.toChunkXZ(Mathf.FloorToInt(Pose.x) - reach), x1 = World.toChunkXZ(Mathf.FloorToInt(Pose.x) + reach);
+			int z0 = World.toChunkXZ(Mathf.FloorToInt(Pose.z) - reach), z1 = World.toChunkXZ(Mathf.FloorToInt(Pose.z) + reach);
+			for (int cx = x0; cx <= x1; cx++)
+				for (int cz = z0; cz <= z1; cz++)
+				{
+					Chunk c = cc.GetChunkSync(cx, cz);
+					if (c == null || !c.IsCollisionMeshGenerated || !cc.DisplayedChunkGameObjects.ContainsKey(c.Key)) return false;
+				}
+			return true;
 		}
 
 		public void SetPose(Vector3 p, float yaw)
