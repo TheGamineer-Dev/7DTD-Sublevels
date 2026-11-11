@@ -19,10 +19,10 @@ namespace SubLevelPhysics
 		private static void Prefix(ref Vector3 dirNormalized, ref Vector3 phsxHitpPoint, out HitState __state)
 		{
 			__state = default(HitState);
-			Plot p = PlotSpace.Current;
-			if (p == null || p.Rb == null || p.RootGo == null) return;
 			Collider col = Voxel.phyxRaycastHit.collider;
-			if (col == null || !col.transform.IsChildOf(p.RootGo.transform)) return;
+			if (col == null) return;
+			Plot p = PlotSpace.FindByTransform(col.transform);
+			if (p == null || p.Rb == null || p.RootGo == null) return;
 
 			Quaternion inv = Quaternion.Inverse(p.Rb.rotation);
 			RaycastHit h = Voxel.phyxRaycastHit;
@@ -50,9 +50,8 @@ namespace SubLevelPhysics
 	{
 		private static void Prefix(ref HitInfoDetails _hitInfo)
 		{
-			Plot p = PlotSpace.Current;
+			Plot p = PlotSpace.FindByChunk(_hitInfo.blockPos.x, _hitInfo.blockPos.z);
 			if (p == null || p.Rb == null) return;
-			if (!p.ContainsXZ(_hitInfo.blockPos.x, _hitInfo.blockPos.z)) return;
 			Vector3 center = new Vector3(_hitInfo.blockPos.x + 0.5f, _hitInfo.blockPos.y + 0.5f, _hitInfo.blockPos.z + 0.5f);
 			if ((_hitInfo.pos - center).sqrMagnitude < 100f * 100f) return; // already plot space
 			_hitInfo.pos = p.UnityToPlotPhysics(_hitInfo.pos - Origin.position);
@@ -66,8 +65,8 @@ namespace SubLevelPhysics
 	{
 		private static bool Prefix(Vector3 _pos, ref float __result)
 		{
-			Plot p = PlotSpace.Current;
-			if (p == null || !p.ContainsXZ(Mathf.FloorToInt(_pos.x), Mathf.FloorToInt(_pos.z))) return true;
+			Plot p = PlotSpace.FindByChunk(Mathf.FloorToInt(_pos.x), Mathf.FloorToInt(_pos.z));
+			if (p == null) return true;
 			__result = 1f;
 			return false;
 		}
@@ -89,8 +88,8 @@ namespace SubLevelPhysics
 		private static void Prefix(ChunkCluster __instance, Vector3i _pos, out SetState __state)
 		{
 			__state = default(SetState);
-			Plot p = PlotSpace.Current;
-			if (p == null || !p.ContainsXZ(_pos.x, _pos.z)) return;
+			Plot p = PlotSpace.FindByChunk(_pos.x, _pos.z);
+			if (p == null) return;
 			__state.InPlot = true;
 			__state.ChunkKey = WorldChunkCache.MakeChunkKey(_pos.x >> 4, _pos.z >> 4);
 			if (!__instance.IsFixedSize) return;
@@ -102,7 +101,7 @@ namespace SubLevelPhysics
 		{
 			if (__state.RestoreFixed) __instance.IsFixedSize = true;
 			if (!__state.InPlot) return;
-			Plot p = PlotSpace.Current;
+			Plot p = PlotSpace.FindByChunk(WorldChunkCache.extractX(__state.ChunkKey) * 16, WorldChunkCache.extractZ(__state.ChunkKey) * 16);
 			if (p != null && p.Driver != null) p.Driver.MarkChunkCollisionDirty(__state.ChunkKey);
 		}
 	}
@@ -116,9 +115,9 @@ namespace SubLevelPhysics
 	{
 		private static void Prefix(ref Vector3 _dirNormalized, ref Vector3 _hitPointPos, Transform _hitTransform)
 		{
-			Plot p = PlotSpace.Current;
-			if (p == null || p.Rb == null || p.RootGo == null || _hitTransform == null) return;
-			if (!_hitTransform.IsChildOf(p.RootGo.transform)) return;
+			if (_hitTransform == null) return;
+			Plot p = PlotSpace.FindByTransform(_hitTransform);
+			if (p == null || p.Rb == null || p.RootGo == null) return;
 			Quaternion inv = Quaternion.Inverse(p.Rb.rotation);
 			_hitPointPos = p.UnityToPlotPhysics(_hitPointPos - Origin.position);
 			_dirNormalized = inv * _dirNormalized;
@@ -133,9 +132,9 @@ namespace SubLevelPhysics
 	{
 		private static void Postfix(ref Vector3 __result)
 		{
-			Plot p = PlotSpace.Current;
-			if (p == null || p.Rb == null || p.RootGo == null || __result == Vector3.zero) return;
-			if (!p.ContainsXZ(Mathf.FloorToInt(__result.x), Mathf.FloorToInt(__result.z))) return;
+			if (__result == Vector3.zero) return;
+			Plot p = PlotSpace.FindByChunk(Mathf.FloorToInt(__result.x), Mathf.FloorToInt(__result.z));
+			if (p == null || p.Rb == null || p.RootGo == null) return;
 			__result = p.PlotToWorldRender(__result);
 		}
 	}
@@ -147,9 +146,8 @@ namespace SubLevelPhysics
 	{
 		private static void Prefix(ref Vector3 position)
 		{
-			Plot p = PlotSpace.Current;
+			Plot p = PlotSpace.FindByChunk(Mathf.FloorToInt(position.x), Mathf.FloorToInt(position.z));
 			if (p == null || p.Rb == null || p.RootGo == null) return;
-			if (!p.ContainsXZ(Mathf.FloorToInt(position.x), Mathf.FloorToInt(position.z))) return;
 			position = p.PlotToWorldRender(position);
 		}
 	}
@@ -161,8 +159,8 @@ namespace SubLevelPhysics
 	{
 		private static bool Prefix(Vector3i _blockPos)
 		{
-			Plot p = PlotSpace.Current;
-			return p == null || !p.ContainsXZ(_blockPos.x, _blockPos.z);
+			Plot p = PlotSpace.FindByChunk(_blockPos.x, _blockPos.z);
+			return p == null;
 		}
 	}
 
@@ -181,8 +179,8 @@ namespace SubLevelPhysics
 
 		private static void Postfix(RenderDisplacedCube __instance, Vector3i _focusBlockPos)
 		{
-			Plot p = PlotSpace.Current;
-			bool inPlot = p != null && p.RootGo != null && p.ContainsXZ(_focusBlockPos.x, _focusBlockPos.z);
+			Plot p = PlotSpace.FindByChunk(_focusBlockPos.x, _focusBlockPos.z);
+			bool inPlot = p != null && p.RootGo != null;
 			Transform wire = WireRef(__instance);
 			Transform preview = PreviewRef(__instance);
 

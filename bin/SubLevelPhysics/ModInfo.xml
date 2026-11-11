@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<xml>
+	<Name value="7DTDSublevels" />
+	<DisplayName value="7DTD Sublevels (Alpha)" />
+	<Description value="Experimental dynamic Rigidbody sublevels whose collision and block logic come from the blocks of the plot they project. Requires EAC off." />
+	<Author value="TheGamineer" />
+	<Version value="0.1.0" />
+	<Website value="" />
+</xml>

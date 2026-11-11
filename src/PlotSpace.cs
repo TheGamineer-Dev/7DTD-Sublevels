@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 using System.Text;
+using System.IO;
+using System.Xml;
 using UnityEngine;
 
 namespace SubLevelPhysics
@@ -22,6 +24,7 @@ namespace SubLevelPhysics
 		public int PlotRadius = 1;                       // derived from requested odd chunk width/depth
 		public int StageRadius { get { return PlotRadius + 2; } } // two support rings for lighting/regeneration
 
+		public string Id;
 		public int Cx, Cz;                 // centre chunk
 		public Vector3i Pivot;             // plot-space block the pose is applied around
 		public readonly List<long> Keys = new List<long>();        // dynamically sized visible footprint
@@ -59,11 +62,92 @@ namespace SubLevelPhysics
 
 	public static class PlotSpace
 	{
-		public static Plot Current;
+		private static readonly List<Plot> plots = new List<Plot>();
+		public static Plot Current { get; private set; }
+		private static World loadedWorld;
+		private static bool metadataLoaded;
+		private static string MetadataPath { get { return GameIO.GetSaveGameDir() + "/sublevels.xml"; } }
+		public static IList<Plot> All { get { return plots.AsReadOnly(); } }
+
+		public static Plot FindById(string id)
+		{
+			if (string.IsNullOrEmpty(id)) return null;
+			return plots.Find(x => string.Equals(x.Id, id, System.StringComparison.OrdinalIgnoreCase));
+		}
+		public static Plot FindByChunk(int x, int z)
+		{
+			int cx = x >> 4, cz = z >> 4;
+			return plots.Find(xp => System.Math.Abs(cx - xp.Cx) <= xp.PlotRadius && System.Math.Abs(cz - xp.Cz) <= xp.PlotRadius);
+		}
+		public static Plot FindByTransform(Transform t)
+		{
+			if (t == null) return null;
+			return plots.Find(x => x.RootGo != null && t.IsChildOf(x.RootGo.transform));
+		}
+		public static bool Select(string id)
+		{
+			Plot p = FindById(id); if (p == null) return false; Current = p; return true;
+		}
+
+		/// <summary>Create a sublevel in the first unused staged chunk area. The search is deterministic,
+		/// and checks the complete visible + support footprint against the live chunk cluster and every
+		/// registered sublevel before allocating anything.</summary>
+		public static string CreateAuto(string blockName, int sizeChunks = 3)
+		{
+			World world = GameManager.Instance != null ? GameManager.Instance.World : null;
+			ChunkCluster cc = world != null ? world.ChunkCache : null;
+			if (cc == null) return "No world/chunk cluster (are you in a game?).";
+			if (sizeChunks < 1 || (sizeChunks & 1) == 0) return "Sublevel footprint must be a positive odd number of chunks.";
+			int spacing = sizeChunks + 6; // footprint plus two support rings and a safety chunk
+			const int baseX = 4000, baseZ = 4000;
+			// Search outward in square rings. Chunk coordinates are deliberately kept in the
+			// mod's reserved high-coordinate area, away from normal player exploration.
+			for (int ring = 0; ring < 2048; ring++)
+			{
+				if (ring == 0)
+				{
+					if (CanAllocate(cc, baseX, baseZ, sizeChunks)) return CreateInternal(baseX, baseZ, blockName, sizeChunks, null, false, true);
+					continue;
+				}
+				for (int dx = -ring; dx <= ring; dx++)
+				{
+					int x1 = baseX + dx * spacing;
+					int z1 = baseZ - ring * spacing;
+					if (CanAllocate(cc, x1, z1, sizeChunks)) return CreateInternal(x1, z1, blockName, sizeChunks, null, false, true);
+					int z2 = baseZ + ring * spacing;
+					if (CanAllocate(cc, x1, z2, sizeChunks)) return CreateInternal(x1, z2, blockName, sizeChunks, null, false, true);
+				}
+				for (int dz = -ring + 1; dz < ring; dz++)
+				{
+					int z = baseZ + dz * spacing;
+					int x1 = baseX - ring * spacing, x2 = baseX + ring * spacing;
+					if (CanAllocate(cc, x1, z, sizeChunks)) return CreateInternal(x1, z, blockName, sizeChunks, null, false, true);
+					if (CanAllocate(cc, x2, z, sizeChunks)) return CreateInternal(x2, z, blockName, sizeChunks, null, false, true);
+				}
+			}
+			return "Could not find an unused sublevel chunk area. Try a larger world or remove unused chunks.";
+		}
+
+		private static bool CanAllocate(ChunkCluster cc, int cx, int cz, int sizeChunks)
+		{
+			int radius = (sizeChunks - 1) / 2;
+			int stage = radius + 2;
+			foreach (Plot p in plots)
+				if (System.Math.Abs(cx - p.Cx) <= stage + p.StageRadius && System.Math.Abs(cz - p.Cz) <= stage + p.StageRadius) return false;
+			for (int dx = -stage; dx <= stage; dx++)
+				for (int dz = -stage; dz <= stage; dz++)
+					if (cc.ContainsChunkSync(WorldChunkCache.MakeChunkKey(cx + dx, cz + dz))) return false;
+			return true;
+		}
 
 		public static string Create(int cx, int cz, string blockName, int sizeChunks = 3)
 		{
-			if (Current != null) return "A plot already exists. Run 'sl clear' first.";
+			return CreateInternal(cx, cz, blockName, sizeChunks, null, false, true);
+		}
+
+		private static string CreateInternal(int cx, int cz, string blockName, int sizeChunks, string requestedId, bool restoring, bool poseInFront)
+		{
+			
 			World world = GameManager.Instance?.World;
 			ChunkCluster cc = world?.ChunkCache;
 			if (cc == null) return "No world/chunk cluster (are you in a game?).";
@@ -74,13 +158,13 @@ namespace SubLevelPhysics
 			BlockValue bv = block.ToBlockValue();
 
 			int radius = (sizeChunks - 1) / 2;
-			var plot = new Plot { Cx = cx, Cz = cz, PlotRadius = radius,
+			var plot = new Plot { Id = string.IsNullOrEmpty(requestedId) ? System.Guid.NewGuid().ToString("N").Substring(0, 8) : requestedId, Cx = cx, Cz = cz, PlotRadius = radius,
 				Pivot = new Vector3i(cx * 16 + 7, 100, cz * 16 + 7) };
 			for (int dx = -plot.StageRadius; dx <= plot.StageRadius; dx++)
 				for (int dz = -plot.StageRadius; dz <= plot.StageRadius; dz++)
 				{
 					long key = WorldChunkCache.MakeChunkKey(cx + dx, cz + dz);
-					if (cc.ContainsChunkSync(key)) return "Chunk " + (cx + dx) + "," + (cz + dz) + " already exists; choose another spot (the plot needs a free " + (plot.StageRadius * 2 + 1) + "x" + (plot.StageRadius * 2 + 1) + " chunk area).";
+					if (!restoring && cc.ContainsChunkSync(key)) return "Chunk " + (cx + dx) + "," + (cz + dz) + " already exists; choose another spot.";
 					bool inner = System.Math.Abs(dx) <= plot.PlotRadius && System.Math.Abs(dz) <= plot.PlotRadius;
 					(inner ? plot.Keys : plot.SupportKeys).Add(key);
 				}
@@ -128,20 +212,22 @@ namespace SubLevelPhysics
 			world.m_ChunkManager.OnChunkRegenerated += plot.OnRegen;
 			world.m_ChunkManager.OnChunkCopiedToUnity += plot.OnCopied;
 
+			plots.Add(plot);
 			Current = plot;
-			Log.Out("[SubLevel] Plot created: centre chunk " + cx + "," + cz + ", footprint=" + sizeChunks + "x" + sizeChunks +
+			Log.Out("[SubLevel] Plot " + plot.Id + " created: centre chunk " + cx + "," + cz + ", footprint=" + sizeChunks + "x" + sizeChunks +
 				" chunks, " + plot.Keys.Count + " plot chunks + " + plot.SupportKeys.Count + " support chunks, pivot " + plot.Pivot + ", clusterFixedSize=" + cc.IsFixedSize);
 
 			// Put it somewhere visible straight away (otherwise it sits at world origin).
 			EntityPlayerLocal pl = world.GetPrimaryPlayer();
 			string where = " Run 'sl here' to place it.";
-			if (pl != null)
+			if (poseInFront && pl != null)
 			{
 				Vector3 truePos = PosInFront(pl);
 				plot.Driver.SetPose(truePos, 0f);
 				where = " Posed at " + truePos + ".";
 			}
-			return "Plot created at chunk " + cx + "," + cz + " with a " + sizeChunks + "x" + sizeChunks +
+			if (!restoring) SaveMetadata();
+			return "Sublevel " + plot.Id + " created at chunk " + cx + "," + cz + " with a " + sizeChunks + "x" + sizeChunks +
 				" chunk footprint (pivot " + plot.Pivot + ")." + where + " Chunks need a second or two to light and mesh; run 'sl status' and check [SubLevel] lines in output_log.txt.";
 		}
 
@@ -156,6 +242,8 @@ namespace SubLevelPhysics
 
 		private static void AddStageChunk(ChunkCluster cc, long key, Plot plot, BlockValue bv, bool support)
 		{
+			Chunk existing = cc.GetChunkSync(key);
+			if (existing != null) return; // saved sublevel chunk: retain blocks, damage, tile entities and inventories
 			Chunk c = MemoryPools.PoolChunks.AllocSync(true);
 			c.X = WorldChunkCache.extractX(key);
 			c.Z = WorldChunkCache.extractZ(key);
@@ -163,7 +251,7 @@ namespace SubLevelPhysics
 			c.NeedsLightDecoration = false;
 			c.ResetStability();
 			c.RefreshSunlight();
-			if (c.X == plot.Cx && c.Z == plot.Cz) FillTestCube(c, bv);
+			if (c.X == plot.Cx && c.Z == plot.Cz && !string.IsNullOrEmpty(bv.Block.GetBlockName())) FillTestCube(c, bv);
 			if (support && IsOuterRing(c, plot))
 			{
 				// The outermost ring can never be lit (its own neighbours would have to exist too). It only has to exist,
@@ -178,7 +266,7 @@ namespace SubLevelPhysics
 				c.NeedsLightCalculation = true;
 				c.NeedsRegeneration = true;
 			}
-			c.isModified = false; // spike: never write plot chunks to the save
+			c.isModified = !support; // visible sublevel chunks are ordinary persistent world chunks
 			cc.AddChunkSync(c);
 		}
 
@@ -200,7 +288,12 @@ namespace SubLevelPhysics
 		/// Goes through World.SetBlock so tile entities (workbench, crate) and block-entity models are created normally.</summary>
 		public static string SetBlockAt(string blockName, int dx, int dy, int dz, int rotation)
 		{
-			Plot p = Current;
+			return SetBlockAt(Current != null ? Current.Id : null, blockName, dx, dy, dz, rotation);
+		}
+
+		public static string SetBlockAt(string id, string blockName, int dx, int dy, int dz, int rotation)
+		{
+			Plot p = FindById(id);
 			if (p == null) return "No plot.";
 			World world = GameManager.Instance?.World;
 			if (world == null) return "No world.";
@@ -211,6 +304,8 @@ namespace SubLevelPhysics
 			BlockValue bv = block.ToBlockValue();
 			bv.rotation = (byte)rotation;
 			world.SetBlock(pos, bv, true, true);
+			Chunk changed = world.ChunkCache.GetChunkSync(pos.x >> 4, pos.z >> 4); if (changed != null) changed.isModified = true;
+			SaveMetadata();
 			return "Set " + block.GetBlockName() + " rot " + rotation + " at plot block " + pos + ".";
 		}
 
@@ -218,10 +313,12 @@ namespace SubLevelPhysics
 		{
 			Plot p = Current;
 			if (p == null) return "No plot.";
-			Current = null;
+			plots.Remove(p);
+			Current = plots.Count > 0 ? plots[plots.Count - 1] : null;
+			SaveMetadata();
 			World world = GameManager.Instance?.World;
 			if (p.Driver != null) p.Driver.DetachAll();
-			ShapeColliderCache.Clear();
+			if (plots.Count == 0) ShapeColliderCache.Clear();
 			if (p.RootGo != null)
 			{
 				Origin.Remove(p.RootGo.transform);
@@ -241,12 +338,7 @@ namespace SubLevelPhysics
 			{
 				var all = new List<long>(p.Keys);
 				all.AddRange(p.SupportKeys);
-				// Make sure nothing about a plot chunk can ever reach the save file.
-				foreach (long key in all)
-				{
-					Chunk c = cc.GetChunkSync(key);
-					if (c != null) c.isModified = false;
-				}
+				// Keep the removed sublevel chunks saved as ordinary world data; they can be reused by a later sublevel.
 				// A fixed-size cluster never unloads chunks that fall out of observer range (DetermineChunksToLoad only
 				// does that for !IsFixedSize), so remove them explicitly. On infinite-terrain clusters the vanilla observer
 				// path does it; doing both would unload twice.
@@ -267,28 +359,99 @@ namespace SubLevelPhysics
 		/// references are dropped here - no cluster calls.</summary>
 		public static void OnWorldShuttingDown()
 		{
-			Plot p = Current;
-			if (p == null) return;
-			Current = null;
-			try { if (p.Driver != null) p.Driver.DetachAll(); } catch (System.Exception) { }
+			SaveMetadata();
+			foreach (Plot p in plots)
+			{
+				try { if (p.Driver != null) p.Driver.DetachAll(); } catch (System.Exception) { }
+				try { if (p.RootGo != null) { Origin.Remove(p.RootGo.transform); Object.Destroy(p.RootGo); } } catch (System.Exception) { }
+			}
+			plots.Clear(); Current = null; loadedWorld = null; metadataLoaded = false;
 			try { ShapeColliderCache.Clear(); } catch (System.Exception) { }
+			Log.Out("[SubLevel] World shutting down: saved sublevel metadata and cleared runtime objects.");
+		}
+
+		public static void OnGameUpdate()
+		{
+			World world = GameManager.Instance != null ? GameManager.Instance.World : null;
+			if (world == null || world.ChunkCache == null) return;
+			if (loadedWorld != world) { loadedWorld = world; metadataLoaded = false; plots.Clear(); Current = null; }
+			if (metadataLoaded) return;
+			metadataLoaded = true;
+			LoadMetadata(world);
+		}
+
+		public static void SaveState() { SaveMetadata(); }
+
+		private static void SaveMetadata()
+		{
+			if (loadedWorld == null) return;
 			try
 			{
-				if (p.RootGo != null)
+				string path = MetadataPath;
+				if (plots.Count == 0) { if (File.Exists(path)) File.Delete(path); return; }
+				string dir = Path.GetDirectoryName(path); if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+				XmlDocument doc = new XmlDocument(); XmlElement root = doc.CreateElement("SubLevels"); doc.AppendChild(root);
+				foreach (Plot p in plots)
 				{
-					Origin.Remove(p.RootGo.transform);
-					Object.Destroy(p.RootGo);
+					if (p.Driver != null) { p.Driver.Pose = p.Rb.position + Origin.position; p.Driver.Yaw = p.Rb.rotation.eulerAngles.y; }
+					XmlElement e = doc.CreateElement("SubLevel"); root.AppendChild(e);
+					e.SetAttribute("id", p.Id); e.SetAttribute("cx", p.Cx.ToString()); e.SetAttribute("cz", p.Cz.ToString());
+					e.SetAttribute("size", (p.PlotRadius * 2 + 1).ToString());
+					e.SetAttribute("x", p.Driver.Pose.x.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+					e.SetAttribute("y", p.Driver.Pose.y.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+					e.SetAttribute("z", p.Driver.Pose.z.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+					e.SetAttribute("yaw", p.Driver.Yaw.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+					e.SetAttribute("vx", p.Driver.Velocity.x.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+					e.SetAttribute("vy", p.Driver.Velocity.y.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+					e.SetAttribute("vz", p.Driver.Velocity.z.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+					e.SetAttribute("yawRate", p.Driver.YawRate.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+					e.SetAttribute("physics", p.Driver.PhysicsEnabled ? "true" : "false");
 				}
+				doc.Save(path);
 			}
-			catch (System.Exception) { }
-			Log.Out("[SubLevel] World shutting down: plot state cleared.");
+			catch (System.Exception ex) { Log.Error("[SubLevel] Could not save sublevel metadata: " + ex); }
+		}
+
+		private static void LoadMetadata(World world)
+		{
+			string path = MetadataPath; if (!File.Exists(path)) return;
+			try
+			{
+				XmlDocument doc = new XmlDocument(); doc.Load(path);
+				foreach (XmlNode n in doc.SelectNodes("/SubLevels/SubLevel"))
+				{
+					XmlElement e = n as XmlElement; if (e == null) continue;
+					int cx = int.Parse(e.GetAttribute("cx")), cz = int.Parse(e.GetAttribute("cz")), size = int.Parse(e.GetAttribute("size"));
+					string id = e.GetAttribute("id");
+					string result = CreateInternal(cx, cz, "cobblestoneShapes:cube", size, id, true, false);
+					Plot p = FindById(id);
+					if (p == null) { Log.Warning("[SubLevel] Could not restore " + id + ": " + result); continue; }
+					float x = float.Parse(e.GetAttribute("x"), System.Globalization.CultureInfo.InvariantCulture);
+					float y = float.Parse(e.GetAttribute("y"), System.Globalization.CultureInfo.InvariantCulture);
+					float z = float.Parse(e.GetAttribute("z"), System.Globalization.CultureInfo.InvariantCulture);
+					float yaw = float.Parse(e.GetAttribute("yaw"), System.Globalization.CultureInfo.InvariantCulture);
+					p.Driver.SetPose(new Vector3(x, y, z), yaw);
+					float vx = ParseOptional(e, "vx"), vy = ParseOptional(e, "vy"), vz = ParseOptional(e, "vz");
+					if (bool.TryParse(e.GetAttribute("physics"), out bool physics)) p.Driver.SetPhysics(physics);
+					p.Driver.RestoreMotion(new Vector3(vx, vy, vz), ParseOptional(e, "yawRate"));
+				}
+				if (plots.Count > 0) Current = plots[0];
+				Log.Out("[SubLevel] Restored " + plots.Count + " saved sublevel(s).");
+			}
+			catch (System.Exception ex) { Log.Error("[SubLevel] Failed to restore sublevels: " + ex); }
+		}
+
+		private static float ParseOptional(XmlElement e, string name)
+		{
+			float value;
+			return float.TryParse(e.GetAttribute(name), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out value) ? value : 0f;
 		}
 
 		public static void ReleaseIfAttached(ChunkGameObject cgo)
 		{
-			Plot p = Current;
-			if (p == null || p.RootGo == null || cgo == null) return;
-			if (cgo.transform.parent == p.RootGo.transform) cgo.transform.SetParent(null, false);
+			if (cgo == null) return;
+			Plot p = FindByTransform(cgo.transform);
+			if (p != null && cgo.transform.parent == p.RootGo.transform) cgo.transform.SetParent(null, false);
 		}
 
 		private static string Flags(Chunk c)
@@ -317,6 +480,34 @@ namespace SubLevelPhysics
 					else { if (n.NeedsDecoration) undecorated++; if (n.NeedsLightCalculation) unlit++; }
 				}
 			return "neighbours: missing=" + missing + " undecorated=" + undecorated + " unlit=" + unlit;
+		}
+
+		public static string ListSublevels()
+		{
+			if (plots.Count == 0) return "No sublevels exist. Create one with 'sl plot'.";
+			var sb = new StringBuilder();
+			sb.AppendLine("Sublevels (" + plots.Count + "):");
+			foreach (Plot p in plots)
+			{
+				Vector3 pos = p.Driver != null ? p.Driver.Pose : Vector3.zero;
+				float yaw = p.Driver != null ? p.Driver.Yaw : 0f;
+				sb.AppendLine("  " + p.Id + (p == Current ? " [selected]" : "") + " | chunks=" + p.Cx + "," + p.Cz + " | size=" + (p.PlotRadius * 2 + 1) + "x" + (p.PlotRadius * 2 + 1) + " | position=" + pos.ToString("F2") + " | yaw=" + yaw.ToString("F1") + " | physics=" + (p.Driver != null && p.Driver.PhysicsEnabled));
+			}
+			return sb.ToString();
+		}
+
+		public static string Destroy(string id)
+		{
+			Plot p = FindById(id);
+			if (p == null) return "Unknown sublevel ID '" + id + "'. Use 'sl list' to see IDs.";
+			Current = p;
+			return Destroy();
+		}
+
+		public static string Status(string id)
+		{
+			if (!Select(id)) return "Unknown sublevel ID '" + id + "'. Use 'sl list' to see IDs.";
+			return Status();
 		}
 
 		public static string Status()
@@ -379,7 +570,12 @@ namespace SubLevelPhysics
 		/// shader samples (world position? world normal? vertex data?) before touching it.</summary>
 		public static string DumpMaterials()
 		{
-			Plot p = Current;
+			return DumpMaterials(Current != null ? Current.Id : null);
+		}
+
+		public static string DumpMaterials(string id)
+		{
+			Plot p = FindById(id);
 			if (p == null) return "No plot.";
 			ChunkCluster cc = GameManager.Instance.World.ChunkCache;
 			ChunkGameObject cgo;

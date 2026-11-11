@@ -13,11 +13,15 @@ namespace SubLevelPhysics
 		{
 			PlotSpace.OnWorldShuttingDown();
 		}
+		private static void OnGameUpdate(ref ModEvents.SGameUpdateData _data)
+		{
+			PlotSpace.OnGameUpdate();
+		}
 
 		public void InitMod(Mod _modInstance)
 		{
 			string running = Constants.cVersionMajor + "." + Constants.cVersionMinor + "." + Constants.cVersionBuild;
-			Log.Out("[SubLevel] Phase 1.1 block-geometry collision + block logic carry-over loading. Built for " + TargetVersion + ", running " + running);
+			Log.Out("[SubLevel] Phase 2 persistent multi-sublevel physics. Built for " + TargetVersion + ", running " + running);
 			if (running != TargetVersion)
 			{
 				Log.Warning("[SubLevel] Version mismatch: patch targets may have changed.");
@@ -25,6 +29,7 @@ namespace SubLevelPhysics
 			// Patch class by class so one bad signature (this mod is built blind against a decompile) cannot take the
 			// others down, and so the log says exactly which patches applied.
 			ModEvents.WorldShuttingDown.RegisterHandler(OnWorldShuttingDown);
+			ModEvents.GameUpdate.RegisterHandler(OnGameUpdate);
 			var harmony = new Harmony(HarmonyId);
 			foreach (Type t in Assembly.GetExecutingAssembly().GetTypes())
 			{

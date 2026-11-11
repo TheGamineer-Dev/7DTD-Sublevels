@@ -23,7 +23,8 @@ namespace SubLevelPhysics
 			// The staff is a development tool exposed in CreativeMode=All. Do not gate it
 			// on IsAdmin: single-player creative users and server hosts can have different
 			// admin flags even though they are legitimately testing their own plot.
-			bool authorized = plot != null && plot.Driver != null && plot.Driver.PhysicsEnabled &&
+			// Each sublevel has its own staff component; only the selected sublevel's component may act.
+			bool authorized = plot != null && plot.RootGo != null && plot.RootGo.transform == transform && plot.Driver != null && plot.Driver.PhysicsEnabled &&
 				player != null && IsHoldingStaff(player);
 
 			if (!authorized)

@@ -21,6 +21,7 @@ namespace SubLevelPhysics
 		internal PlotBlockColliders Colliders;
 
 		private float nextWatch;
+		private float nextPersist;
 		private Vector3 lastOccPos = new Vector3(float.MaxValue, 0f, 0f);
 		private Quaternion lastOccRot = Quaternion.identity;
 		private int attachedLogged;
@@ -29,8 +30,11 @@ namespace SubLevelPhysics
 		// builds configure that layer to ignore itself. A dynamic sublevel hull copied
 		// onto the same layer would then pass straight through ordinary terrain.
 		private const int TerrainCollisionLayer = 16;
-		private bool terrainSelfCollisionWasIgnored;
-		private bool terrainSelfCollisionOverrideApplied;
+		// Shared across all sublevels: the collision matrix is global, so it is reference-counted.
+		// The first physics sublevel records the original state; the last one to stop restores it.
+		private static int terrainOverrideUsers;
+		private static bool terrainOriginalIgnored;
+		private bool terrainSelfCollisionOverrideApplied; // this driver currently holds a reference
 
 		private void Awake()
 		{
@@ -94,13 +98,7 @@ namespace SubLevelPhysics
 				// Block colliders use the same layer as vanilla terrain collision (layer 16). If the game's collision matrix
 				// ignores layer 16 against itself, a dynamic sublevel can never land on terrain. Temporarily enable only this
 				// pair while sublevel physics is active.
-				terrainSelfCollisionWasIgnored = Physics.GetIgnoreLayerCollision(TerrainCollisionLayer, TerrainCollisionLayer);
-				if (terrainSelfCollisionWasIgnored)
-				{
-					Physics.IgnoreLayerCollision(TerrainCollisionLayer, TerrainCollisionLayer, false);
-					terrainSelfCollisionOverrideApplied = true;
-				}
-				Log.Out("[SubLevel] TerrainCollision layer 16 self-ignore=" + terrainSelfCollisionWasIgnored + "; temporary self-collision override=" + terrainSelfCollisionOverrideApplied + ".");
+				AcquireTerrainCollisionMatrix();
 				Physics.SyncTransforms();
 				rb.isKinematic = false;
 				rb.useGravity = true;
@@ -136,12 +134,29 @@ namespace SubLevelPhysics
 			return "Unity Rigidbody physics disabled. The sublevel keeps its block collision in scripted (kinematic) mode.";
 		}
 
+		private void AcquireTerrainCollisionMatrix()
+		{
+			if (terrainSelfCollisionOverrideApplied) return;
+			if (terrainOverrideUsers == 0)
+			{
+				terrainOriginalIgnored = Physics.GetIgnoreLayerCollision(TerrainCollisionLayer, TerrainCollisionLayer);
+				if (terrainOriginalIgnored) Physics.IgnoreLayerCollision(TerrainCollisionLayer, TerrainCollisionLayer, false);
+			}
+			terrainOverrideUsers++;
+			terrainSelfCollisionOverrideApplied = true;
+			Log.Out("[SubLevel] TerrainCollision layer 16 original self-ignore=" + terrainOriginalIgnored + "; sublevels using override=" + terrainOverrideUsers + ".");
+		}
+
 		private void RestoreTerrainCollisionMatrix()
 		{
 			if (!terrainSelfCollisionOverrideApplied) return;
-			Physics.IgnoreLayerCollision(TerrainCollisionLayer, TerrainCollisionLayer, terrainSelfCollisionWasIgnored);
-			Log.Out("[SubLevel] Restored TerrainCollision layer 16 self-ignore=" + terrainSelfCollisionWasIgnored + ".");
 			terrainSelfCollisionOverrideApplied = false;
+			terrainOverrideUsers = Mathf.Max(0, terrainOverrideUsers - 1);
+			if (terrainOverrideUsers == 0 && terrainOriginalIgnored)
+			{
+				Physics.IgnoreLayerCollision(TerrainCollisionLayer, TerrainCollisionLayer, true);
+				Log.Out("[SubLevel] Restored TerrainCollision layer 16 self-ignore=true.");
+			}
 		}
 
 		private void OnDestroy()
@@ -151,6 +166,7 @@ namespace SubLevelPhysics
 
 		private void Update()
 		{
+			if (PlotSpace.Current == Plot && Time.realtimeSinceStartup >= nextPersist) { nextPersist = Time.realtimeSinceStartup + 5f; PlotSpace.SaveState(); }
 			if (Colliders != null) Colliders.Tick(PhysicsEnabled, rb);
 			Watchdog();
 		}
@@ -223,7 +239,8 @@ namespace SubLevelPhysics
 			{
 				Chunk c = cc.GetChunkSync(key);
 				if (c == null) continue;
-				c.isModified = false;
+				// Do not clear isModified on visible plot chunks here: vanilla's save
+				// pipeline uses it to persist block changes, tile entities, and damage.
 				ChunkGameObject cgo;
 				if (cc.DisplayedChunkGameObjects.TryGetValue(key, out cgo) && cgo != null && c.IsDisplayed && !c.NeedsCopying) { displayed++; continue; }
 				sb.Append(" [" + c.X + "," + c.Z + " " + Wait(cc, c) + "]");
@@ -268,6 +285,18 @@ namespace SubLevelPhysics
 				rb.position = local;
 				rb.rotation = q;
 				if (PhysicsEnabled) { rb.velocity = Vector3.zero; rb.angularVelocity = Vector3.zero; }
+			}
+		}
+
+		/// <summary>Applies saved velocities when a sublevel is restored from sublevels.xml. In dynamic
+		/// mode the Rigidbody owns velocity, so it must be pushed into the body (FixedUpdate mirrors it back).</summary>
+		public void RestoreMotion(Vector3 velocity, float yawRateDegPerSec)
+		{
+			Velocity = velocity; YawRate = yawRateDegPerSec;
+			if (PhysicsEnabled && rb != null)
+			{
+				rb.velocity = velocity;
+				rb.angularVelocity = new Vector3(0f, yawRateDegPerSec * Mathf.Deg2Rad, 0f);
 			}
 		}
 

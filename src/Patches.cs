@@ -22,10 +22,10 @@ namespace SubLevelPhysics
 	{
 		private static bool Prefix(ChunkGameObject __instance)
 		{
-			Plot p = PlotSpace.Current;
-			if (p == null) return true;
 			Chunk c = __instance.GetChunk();
-			if (c == null || !p.IsPlotKey(c.Key)) return true;
+			if (c == null) return true;
+			Plot p = PlotSpace.FindByChunk(c.X * 16, c.Z * 16);
+			if (p == null || !p.IsPlotKey(c.Key)) return true;
 			for (int i = 0; i < __instance.layers.Length; i++)
 			{
 				ChunkGameObjectLayer l = __instance.layers[i];
@@ -53,8 +53,8 @@ namespace SubLevelPhysics
 	{
 		private static void Prefix(Vector3i _chunkPos, ref BlockShape.MeshPurpose _purpose)
 		{
-			Plot p = PlotSpace.Current;
-			if (p == null || !p.ContainsXZ(_chunkPos.x, _chunkPos.z)) return;
+			Plot p = PlotSpace.FindByChunk(_chunkPos.x, _chunkPos.z);
+			if (p == null) return;
 			_purpose = BlockShape.MeshPurpose.Local;
 		}
 	}

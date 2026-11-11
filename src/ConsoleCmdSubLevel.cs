@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Globalization;
 using UnityEngine;
 using UnityEngine.Scripting;
 
@@ -10,103 +11,131 @@ namespace SubLevelPhysics
 		public override int DefaultPermissionLevel => 0;
 		public override bool IsExecuteOnClient => false;
 
-		public override string getDescription() { return "Sub-level physics Phase 0 spikes"; }
+		public override string getDescription() { return "Persistent multi-sublevel physics"; }
 		public override string[] getCommands() { return new[] { "sublevel", "sl" }; }
 		public override string getHelp()
 		{
-			return "sl plot [chunkX chunkZ] [sizeChunks] [block]   create a dynamically sized square plot (odd chunk width/depth; two support rings) + 10-block test cube, posed in front of you (defaults: chunk 4000 4000, size 3, cobblestoneShapes:cube)\n" +
-			       "sl here                            re-pose the plot 6 m in front of you, 1 m above your feet\n" +
-			       "sl pose <x> <y> <z> [yaw]          set pose (true world coords)\n" +
-			       "sl move <vx> <vy> <vz>             constant velocity (m/s) ; 'sl move 0 0 0' stops\n" +
-			       "sl spin <degPerSec>                constant yaw rate (scripted mode only)\n" +
-			       "sl physics true|false               enable Unity dynamic Rigidbody physics / return to scripted mode\n" +
-			       "   Physics Staff: Creative Mode item; hold left mouse to grab, release to drop, scroll to change reach\n" +
-			       "sl set <block> <dx> <dy> <dz> [rot]  set a block relative to the plot pivot (test floor is dy=0); e.g. 'sl set cobblestoneShapes:ramp 0 1 0' or a workbench / crate to test block logic\n" +
-			       "sl status                          dump plot/chunk/pipeline/mesh/collider state (also written to output_log.txt)\n" +
-			       "sl mat                             dump block shader/material properties of the plot to output_log.txt\n" +
-			       "sl clear                           remove plot and observer";
+			return "sl plot [sizeChunks] [block]              create at the next free sublevel location (default size 3)\n" +
+			       "sl plot <chunkX> <chunkZ> [size] [block]  create at explicit chunk coordinates\n" +
+			       "sl list | sl lists | sl plots              list every sublevel and its ID/position\n" +
+			       "sl select <id>                            select a sublevel for inspection\n" +
+			       "sl here <id>                              pose a sublevel 6m in front of you\n" +
+			       "sl pose <id> <x> <y> <z> [yaw]            set world position/orientation\n" +
+			       "sl move <id> <vx> <vy> <vz>               set velocity in m/s\n" +
+			       "sl move <id> (x,y,z) <speed>              move along a direction at speed\n" +
+			       "sl spin <id> <degPerSec>                  set scripted yaw rate\n" +
+			       "sl physics <id> true|false                toggle dynamic Rigidbody physics for ONE sublevel\n" +
+			       "sl set <id> <block> <dx> <dy> <dz> [rot]  place a block relative to that sublevel\n" +
+			       "sl status [id]                            inspect one sublevel or list all\n" +
+			       "sl mat <id>                               dump that sublevel's materials\n" +
+			       "sl delete <id>                            delete one sublevel\n" +
+			       "Physics-changing commands require an explicit ID. Use 'sl list' to find IDs.";
+		}
+
+		private static bool TryFloat(string s, out float value)
+		{
+			return float.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out value);
+		}
+
+		private static Plot RequirePlot(List<string> p, int idIndex, SdtdConsole con)
+		{
+			if (p.Count <= idIndex) { con.Output("This command requires a sublevel ID. Use 'sl list' to see IDs."); return null; }
+			Plot plot = PlotSpace.FindById(p[idIndex]);
+			if (plot == null) con.Output("Unknown sublevel ID '" + p[idIndex] + "'. Use 'sl list' to see IDs.");
+			else PlotSpace.Select(plot.Id);
+			return plot;
 		}
 
 		public override void Execute(List<string> p, CommandSenderInfo info)
 		{
-			var con = SingletonMonoBehaviour<SdtdConsole>.Instance;
+			SdtdConsole con = SingletonMonoBehaviour<SdtdConsole>.Instance;
 			string sub = p.Count > 0 ? p[0].ToLowerInvariant() : "help";
-			Plot plot = PlotSpace.Current;
 			switch (sub)
 			{
 				case "plot":
 				{
-					int cx = 4000, cz = 4000, sizeChunks = 3; string block = "cobblestoneShapes:cube";
-					if (p.Count >= 3 && int.TryParse(p[1], out int a) && int.TryParse(p[2], out int b)) { cx = a; cz = b; }
-					if (p.Count == 2) block = p[1];
-					else if (p.Count == 4)
+					int size = 3;
+					string block = "cobblestoneShapes:cube";
+					string result;
+					if (p.Count == 1) result = PlotSpace.CreateAuto(block, size);
+					else if (p.Count == 2 && int.TryParse(p[1], out size)) result = PlotSpace.CreateAuto(block, size);
+					else if (p.Count == 2) { block = p[1]; result = PlotSpace.CreateAuto(block, size); }
+					else if (p.Count >= 3 && int.TryParse(p[1], out int cx) && int.TryParse(p[2], out int cz))
 					{
-						if (int.TryParse(p[3], out int parsedSize)) sizeChunks = parsedSize;
-						else block = p[3]; // legacy syntax: sl plot cx cz block
+						if (p.Count >= 4 && !int.TryParse(p[3], out size)) { con.Output("Usage: sl plot <chunkX> <chunkZ> [oddSize] [block]"); break; }
+						if (p.Count >= 5) block = p[4];
+						result = PlotSpace.Create(cx, cz, block, size);
 					}
-					else if (p.Count >= 5)
-					{
-						if (!int.TryParse(p[3], out sizeChunks)) { con.Output("Usage: sl plot [chunkX chunkZ] [sizeChunks] [block]"); break; }
-						block = p[4];
-					}
-					string res = PlotSpace.Create(cx, cz, block, sizeChunks);
-					Log.Out("[SubLevel] sl plot -> " + res);
-					con.Output(res);
-					break;
+					else { con.Output("Usage: sl plot [sizeChunks] [block] OR sl plot <chunkX> <chunkZ> [sizeChunks] [block]"); break; }
+					Log.Out("[SubLevel] " + result); con.Output(result); break;
 				}
+				case "list": case "lists": case "plots":
+					con.Output(PlotSpace.ListSublevels()); break;
+				case "select":
+					if (p.Count < 2) { con.Output("Usage: sl select <id>"); break; }
+					con.Output(PlotSpace.Select(p[1]) ? "Selected sublevel " + p[1] + "." : "Unknown sublevel ID '" + p[1] + "'. Use 'sl list'."); break;
 				case "here":
 				{
-					if (plot == null) { con.Output("No plot."); break; }
+					Plot plot = RequirePlot(p, 1, con); if (plot == null) break;
 					EntityPlayerLocal pl = GameManager.Instance.World.GetPrimaryPlayer();
 					if (pl == null) { con.Output("No local player."); break; }
-					Vector3 truePos = PlotSpace.PosInFront(pl);
-					plot.Driver.SetPose(truePos, 0f);
-					con.Output("Pose set to " + truePos);
-					break;
+					Vector3 pos = PlotSpace.PosInFront(pl); plot.Driver.SetPose(pos, 0f); PlotSpace.SaveState();
+					con.Output("Sublevel " + plot.Id + " posed at " + pos); break;
 				}
 				case "pose":
 				{
-					if (plot == null || p.Count < 4) { con.Output("Usage: sl pose x y z [yaw] (needs a plot)"); break; }
-					float yaw = p.Count > 4 ? float.Parse(p[4]) : 0f;
-					plot.Driver.SetPose(new Vector3(float.Parse(p[1]), float.Parse(p[2]), float.Parse(p[3])), yaw);
-					con.Output("ok");
-					break;
+					Plot plot = RequirePlot(p, 1, con); if (plot == null) break;
+					if (p.Count < 5 || !TryFloat(p[2], out float x) || !TryFloat(p[3], out float y) || !TryFloat(p[4], out float z)) { con.Output("Usage: sl pose <id> <x> <y> <z> [yaw]"); break; }
+					float yaw = 0f; if (p.Count > 5 && !TryFloat(p[5], out yaw)) { con.Output("Invalid yaw."); break; }
+					plot.Driver.SetPose(new Vector3(x, y, z), yaw); PlotSpace.SaveState(); con.Output("Pose set for " + plot.Id + "."); break;
 				}
 				case "move":
-					if (plot == null || p.Count < 4) { con.Output("Usage: sl move vx vy vz"); break; }
-					if (plot.Driver.PhysicsEnabled) { con.Output("Scripted velocity is unavailable while physics is enabled."); break; }
-					plot.Driver.Velocity = new Vector3(float.Parse(p[1]), float.Parse(p[2]), float.Parse(p[3]));
-					con.Output("ok");
-					break;
-				case "spin":
-					if (plot == null || p.Count < 2) { con.Output("Usage: sl spin degPerSec"); break; }
-					if (plot.Driver.PhysicsEnabled) { con.Output("Scripted spin is unavailable while physics is enabled."); break; }
-					plot.Driver.YawRate = float.Parse(p[1]);
-					con.Output("ok");
-					break;
-				case "physics":
-					if (plot == null || p.Count < 2) { con.Output("Usage: sl physics true|false"); break; }
-					bool physicsEnabled;
-					if (!bool.TryParse(p[1], out physicsEnabled)) { con.Output("Usage: sl physics true|false"); break; }
-					con.Output(plot.Driver.SetPhysics(physicsEnabled));
-					break;
-				case "status":
 				{
-					string st = PlotSpace.Status();
-					con.Output(st);
-					Log.Out("[SubLevel] status:\n" + st);
-					break;
+					Plot plot = RequirePlot(p, 1, con); if (plot == null) break;
+					Vector3 velocity;
+					if (p.Count == 4)
+					{
+						string[] xyz = p[2].Trim('(', ')').Split(',');
+						if (xyz.Length != 3 || !TryFloat(xyz[0], out float dx) || !TryFloat(xyz[1], out float dy) || !TryFloat(xyz[2], out float dz) || !TryFloat(p[3], out float speed)) { con.Output("Usage: sl move <id> (x,y,z) <speed>"); break; }
+						Vector3 direction = new Vector3(dx, dy, dz);
+						if (direction.sqrMagnitude < 1e-8f && speed != 0f) { con.Output("Direction cannot be zero when speed is nonzero."); break; }
+						velocity = direction.normalized * speed;
+					}
+					else if (p.Count == 5 && TryFloat(p[2], out float vx) && TryFloat(p[3], out float vy) && TryFloat(p[4], out float vz)) velocity = new Vector3(vx, vy, vz);
+					else { con.Output("Usage: sl move <id> <vx> <vy> <vz> OR sl move <id> (x,y,z) <speed>"); break; }
+					if (plot.Driver.PhysicsEnabled) { con.Output("Disable physics for this sublevel before setting scripted velocity."); break; }
+					plot.Driver.Velocity = velocity; PlotSpace.SaveState(); con.Output("Velocity set for " + plot.Id + ": " + velocity); break;
+				}
+				case "spin":
+				{
+					Plot plot = RequirePlot(p, 1, con); if (plot == null) break;
+					if (p.Count != 3 || !TryFloat(p[2], out float rate)) { con.Output("Usage: sl spin <id> <degPerSec>"); break; }
+					if (plot.Driver.PhysicsEnabled) { con.Output("Scripted spin is unavailable while physics is enabled."); break; }
+					plot.Driver.YawRate = rate; PlotSpace.SaveState(); con.Output("Yaw rate set for " + plot.Id + "."); break;
+				}
+				case "physics":
+				{
+					Plot plot = RequirePlot(p, 1, con); if (plot == null) break;
+					if (p.Count != 3 || !bool.TryParse(p[2], out bool enabled)) { con.Output("Usage: sl physics <id> true|false. An ID is required; no global toggle exists."); break; }
+					con.Output(plot.Driver.SetPhysics(enabled)); PlotSpace.SaveState(); break;
 				}
 				case "set":
 				{
-					int dx, dy, dz, rot = 0;
-					if (p.Count < 5 || !int.TryParse(p[2], out dx) || !int.TryParse(p[3], out dy) || !int.TryParse(p[4], out dz) || (p.Count > 5 && !int.TryParse(p[5], out rot)))
-					{ con.Output("Usage: sl set <block> <dx> <dy> <dz> [rotation]"); break; }
-					con.Output(PlotSpace.SetBlockAt(p[1], dx, dy, dz, rot));
-					break;
+					Plot plot = RequirePlot(p, 1, con); if (plot == null) break;
+					if (p.Count < 6 || !int.TryParse(p[3], out int dx) || !int.TryParse(p[4], out int dy) || !int.TryParse(p[5], out int dz)) { con.Output("Usage: sl set <id> <block> <dx> <dy> <dz> [rotation]"); break; }
+					int rot = 0; if (p.Count > 6 && !int.TryParse(p[6], out rot)) { con.Output("Invalid rotation."); break; }
+					con.Output(PlotSpace.SetBlockAt(plot.Id, p[2], dx, dy, dz, rot)); break;
 				}
-				case "mat": con.Output(PlotSpace.DumpMaterials()); break;
-				case "clear": con.Output(PlotSpace.Destroy()); break;
+				case "status":
+					con.Output(p.Count > 1 ? PlotSpace.Status(p[1]) : PlotSpace.ListSublevels()); break;
+				case "mat":
+				{
+					Plot plot = RequirePlot(p, 1, con); if (plot == null) break;
+					con.Output(PlotSpace.DumpMaterials(plot.Id)); break;
+				}
+				case "delete": case "clear":
+					if (p.Count < 2) { con.Output("Usage: sl delete <id>. Deleting all sublevels is intentionally unsupported."); break; }
+					con.Output(PlotSpace.Destroy(p[1])); break;
 				default: con.Output(getHelp()); break;
 			}
 		}
