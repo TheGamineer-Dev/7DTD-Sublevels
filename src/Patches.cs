@@ -53,10 +53,25 @@ namespace SubLevelPhysics
 	{
 		private static void Prefix(Vector3i _chunkPos, ref BlockShape.MeshPurpose _purpose)
 		{
+			if (_purpose != BlockShape.MeshPurpose.World) return; // previews/held items keep their own branch
 			Plot p = PlotSpace.FindByChunk(_chunkPos.x, _chunkPos.z);
 			if (p == null) return;
 			_purpose = BlockShape.MeshPurpose.Local;
 		}
 	}
 
+
+	/// <summary>Origin.Reposition moves SubLevelRoot (registered at level -1) and then ChunkManager.OriginChanged shifts every
+	/// in-use ChunkGameObject again - including the plot's, which are children of the root, so they end up shifted twice and
+	/// Reposition's Physics.Simulate runs with the block-entity colliders misplaced. Put them back right away.</summary>
+	[HarmonyPatch(typeof(ChunkManager), nameof(ChunkManager.OriginChanged))]
+	internal static class OriginChangedResnapPatch
+	{
+		private static void Postfix()
+		{
+			if (PlotSpace.Count == 0) return;
+			foreach (Plot p in PlotSpace.All) if (p.Driver != null) p.Driver.Resnap();
+			Physics.SyncTransforms();
+		}
+	}
 }
