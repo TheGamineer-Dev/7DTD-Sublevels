@@ -415,7 +415,8 @@ namespace SubLevelPhysics
 			if (!p.ContainsXZ(pos.x, pos.z)) return "Position " + pos + " is outside the visible plot footprint.";
 			BlockValue bv = block.ToBlockValue();
 			bv.rotation = (byte)rotation;
-			world.SetBlock(pos, bv, true, true);
+			// Through the game's own RPC: applied here AND sent to every client that has the chunk (world.SetBlock is local only).
+			GameManager.Instance.SetBlocksRPC(new List<BlockChangeInfo> { new BlockChangeInfo(new BlockValueRef(pos), bv, true) });
 			Chunk changed = world.ChunkCache.GetChunkSync(pos.x >> 4, pos.z >> 4); if (changed != null) changed.isModified = true;
 			SaveMetadata();
 			return "Set " + block.GetBlockName() + " rot " + rotation + " at plot block " + pos + ".";
