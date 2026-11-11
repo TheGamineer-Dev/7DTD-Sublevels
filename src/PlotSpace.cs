@@ -63,6 +63,12 @@ namespace SubLevelPhysics
 	public static class PlotSpace
 	{
 		private static readonly List<Plot> plots = new List<Plot>();
+		/// <summary>Immutable copy of <see cref="plots"/>, replaced (never mutated) on every change. The Find* lookups run on
+		/// mesh threads (BlockShapeNew.renderFace) and per frame, so they read this instead of the List.</summary>
+		private static volatile Plot[] snapshot = new Plot[0];
+		private static void Publish() { snapshot = plots.ToArray(); }
+		/// <summary>True when the saved file could not be read; the file is then never overwritten or deleted this session.</summary>
+		private static bool metadataUnreadable;
 		public static Plot Current { get; private set; }
 		private static World loadedWorld;
 		private static bool metadataLoaded;
@@ -78,12 +84,21 @@ namespace SubLevelPhysics
 		public static Plot FindByChunk(int x, int z)
 		{
 			int cx = x >> 4, cz = z >> 4;
-			return plots.Find(xp => System.Math.Abs(cx - xp.Cx) <= xp.PlotRadius && System.Math.Abs(cz - xp.Cz) <= xp.PlotRadius);
+			Plot[] s = snapshot;
+			for (int i = 0; i < s.Length; i++)
+			{
+				Plot xp = s[i];
+				if (System.Math.Abs(cx - xp.Cx) <= xp.PlotRadius && System.Math.Abs(cz - xp.Cz) <= xp.PlotRadius) return xp;
+			}
+			return null;
 		}
 		public static Plot FindByTransform(Transform t)
 		{
-			if (t == null) return null;
-			return plots.Find(x => x.RootGo != null && t.IsChildOf(x.RootGo.transform));
+			Plot[] s = snapshot;
+			if (t == null || s.Length == 0) return null;
+			for (int i = 0; i < s.Length; i++)
+				if (s[i].RootGo != null && t.IsChildOf(s[i].RootGo.transform)) return s[i];
+			return null;
 		}
 		public static bool Select(string id)
 		{
@@ -137,8 +152,33 @@ namespace SubLevelPhysics
 				if (System.Math.Abs(cx - p.Cx) <= stage + p.StageRadius && System.Math.Abs(cz - p.Cz) <= stage + p.StageRadius) return false;
 			for (int dx = -stage; dx <= stage; dx++)
 				for (int dz = -stage; dz <= stage; dz++)
-					if (cc.ContainsChunkSync(WorldChunkCache.MakeChunkKey(cx + dx, cz + dz))) return false;
-			return true;
+				{
+					long key = WorldChunkCache.MakeChunkKey(cx + dx, cz + dz);
+					if (cc.ContainsChunkSync(key) || OnDisk(cc, key)) return false;
+				}
+			return RefuseArea(GameManager.Instance.World, cx, cz, stage) == null;
+		}
+
+		private static RegionFileManager Regions(ChunkCluster cc)
+		{
+			return cc != null ? (cc.ChunkProvider as ChunkProviderGenerateWorld)?.m_RegionFileManager : null;
+		}
+
+		/// <summary>True if the chunk is saved in the world's region files (it may not be loaded right now).</summary>
+		private static bool OnDisk(ChunkCluster cc, long key)
+		{
+			RegionFileManager rfm = Regions(cc);
+			return rfm != null && rfm.ContainsChunkSync(key);
+		}
+
+		/// <summary>Sublevel chunks must stay well outside the playable map: a plot there would replace real terrain.</summary>
+		private static string RefuseArea(World world, int cx, int cz, int stageRadius)
+		{
+			if (world == null || !world.GetWorldExtent(out Vector3i min, out Vector3i max)) return null;
+			const int margin = 512; // blocks beyond the map edge that stay off limits
+			int x0 = (cx - stageRadius) * 16, x1 = (cx + stageRadius + 1) * 16, z0 = (cz - stageRadius) * 16, z1 = (cz + stageRadius + 1) * 16;
+			bool overlaps = x1 > min.x - margin && x0 < max.x + margin && z1 > min.z - margin && z0 < max.z + margin;
+			return overlaps ? "Chunk area " + cx + "," + cz + " is inside the map or within " + margin + " blocks of its edge (map " + min.x + ".." + max.x + " x " + min.z + ".." + max.z + "); sublevels must live outside it." : null;
 		}
 
 		public static string Create(int cx, int cz, string blockName, int sizeChunks = 3)
@@ -159,13 +199,18 @@ namespace SubLevelPhysics
 			BlockValue bv = block.ToBlockValue();
 
 			int radius = (sizeChunks - 1) / 2;
+			if (!restoring)
+			{
+				string refuse = RefuseArea(world, cx, cz, radius + 2);
+				if (refuse != null) return refuse;
+			}
 			var plot = new Plot { Id = string.IsNullOrEmpty(requestedId) ? System.Guid.NewGuid().ToString("N").Substring(0, 8) : requestedId, Cx = cx, Cz = cz, PlotRadius = radius,
 				Pivot = new Vector3i(cx * 16 + 7, 100, cz * 16 + 7) };
 			for (int dx = -plot.StageRadius; dx <= plot.StageRadius; dx++)
 				for (int dz = -plot.StageRadius; dz <= plot.StageRadius; dz++)
 				{
 					long key = WorldChunkCache.MakeChunkKey(cx + dx, cz + dz);
-					if (!restoring && cc.ContainsChunkSync(key)) return "Chunk " + (cx + dx) + "," + (cz + dz) + " already exists; choose another spot.";
+					if (!restoring && (cc.ContainsChunkSync(key) || OnDisk(cc, key))) return "Chunk " + (cx + dx) + "," + (cz + dz) + " already exists; choose another spot.";
 					bool inner = System.Math.Abs(dx) <= plot.PlotRadius && System.Math.Abs(dz) <= plot.PlotRadius;
 					(inner ? plot.Keys : plot.SupportKeys).Add(key);
 				}
@@ -214,6 +259,7 @@ namespace SubLevelPhysics
 			world.m_ChunkManager.OnChunkCopiedToUnity += plot.OnCopied;
 
 			plots.Add(plot);
+			Publish();
 			Current = plot;
 			Log.Out("[SubLevel] Plot " + plot.Id + " created: centre chunk " + cx + "," + cz + ", footprint=" + sizeChunks + "x" + sizeChunks +
 				" chunks, " + plot.Keys.Count + " plot chunks + " + plot.SupportKeys.Count + " support chunks, pivot " + plot.Pivot + ", clusterFixedSize=" + cc.IsFixedSize);
@@ -244,7 +290,15 @@ namespace SubLevelPhysics
 		private static void AddStageChunk(ChunkCluster cc, long key, Plot plot, BlockValue bv, bool support)
 		{
 			Chunk existing = cc.GetChunkSync(key);
-			if (existing != null) return; // saved sublevel chunk: retain blocks, damage, tile entities and inventories
+			if (existing != null) return; // already loaded: retain blocks, damage, tile entities and inventories
+			// Saved sublevel chunk on disk (a reload): leave it to the chunk provider, which loads it from the region files on
+			// its own thread once the observers ask for it. Building a blank chunk here would hide the saved one (the next
+			// save overwrites it), and reading the region files from this (main) thread races the provider's reader.
+			if (OnDisk(cc, key))
+			{
+				Log.Out("[SubLevel] chunk " + WorldChunkCache.extractX(key) + "," + WorldChunkCache.extractZ(key) + " of sublevel " + plot.Id + " is saved: the chunk provider loads it.");
+				return;
+			}
 			Chunk c = MemoryPools.PoolChunks.AllocSync(true);
 			c.X = WorldChunkCache.extractX(key);
 			c.Z = WorldChunkCache.extractZ(key);
@@ -315,6 +369,7 @@ namespace SubLevelPhysics
 			Plot p = Current;
 			if (p == null) return "No plot.";
 			plots.Remove(p);
+			Publish();
 			Current = plots.Count > 0 ? plots[plots.Count - 1] : null;
 			SaveMetadata();
 			World world = GameManager.Instance?.World;
@@ -367,7 +422,7 @@ namespace SubLevelPhysics
 				try { if (p.Driver != null) p.Driver.DetachAll(); } catch (System.Exception) { }
 				try { if (p.RootGo != null) { Origin.Remove(p.RootGo.transform); Object.Destroy(p.RootGo); } } catch (System.Exception) { }
 			}
-			plots.Clear(); Current = null; loadedWorld = null; metadataLoaded = false;
+			plots.Clear(); Publish(); Current = null; loadedWorld = null; metadataLoaded = false; metadataUnreadable = false;
 			try { ShapeColliderCache.Clear(); } catch (System.Exception) { }
 			Log.Out("[SubLevel] World shutting down: saved sublevel metadata and cleared runtime objects.");
 		}
@@ -376,8 +431,14 @@ namespace SubLevelPhysics
 		{
 			World world = GameManager.Instance != null ? GameManager.Instance.World : null;
 			if (world == null || world.ChunkCache == null) return;
-			if (loadedWorld != world) { loadedWorld = world; metadataLoaded = false; plots.Clear(); Current = null; }
+			if (loadedWorld != world) { loadedWorld = world; metadataLoaded = false; metadataUnreadable = false; plots.Clear(); Publish(); Current = null; }
 			if (metadataLoaded) return;
+			// Not during world load: the chunk provider / region files are not ready and nothing under the saved poses has
+			// collision yet. Sublevels live on the server (single player = host); a remote client never builds them.
+			GameManager gm = GameManager.Instance;
+			if (gm.gameStateManager == null || !gm.gameStateManager.IsGameStarted() || world.ChunkCache.ChunkProvider == null) return;
+			ConnectionManager conn = SingletonMonoBehaviour<ConnectionManager>.Instance;
+			if (conn != null && !conn.IsServer) { metadataLoaded = true; return; }
 			metadataLoaded = true;
 			LoadMetadata(world);
 		}
@@ -386,7 +447,7 @@ namespace SubLevelPhysics
 
 		private static void SaveMetadata()
 		{
-			if (loadedWorld == null) return;
+			if (loadedWorld == null || !metadataLoaded || metadataUnreadable) return;
 			try
 			{
 				string path = MetadataPath;
@@ -395,7 +456,7 @@ namespace SubLevelPhysics
 				XmlDocument doc = new XmlDocument(); XmlElement root = doc.CreateElement("SubLevels"); doc.AppendChild(root);
 				foreach (Plot p in plots)
 				{
-					if (p.Driver != null) { p.Driver.Pose = p.Rb.position + Origin.position; p.Driver.Yaw = p.Rb.rotation.eulerAngles.y; }
+					if (p.Driver != null && !p.Driver.RestorePending) { p.Driver.Pose = p.Rb.position + Origin.position; p.Driver.Yaw = p.Rb.rotation.eulerAngles.y; }
 					XmlElement e = doc.CreateElement("SubLevel"); root.AppendChild(e);
 					e.SetAttribute("id", p.Id); e.SetAttribute("cx", p.Cx.ToString()); e.SetAttribute("cz", p.Cz.ToString());
 					e.SetAttribute("size", (p.PlotRadius * 2 + 1).ToString());
@@ -407,9 +468,16 @@ namespace SubLevelPhysics
 					e.SetAttribute("vy", p.Driver.Velocity.y.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
 					e.SetAttribute("vz", p.Driver.Velocity.z.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
 					e.SetAttribute("yawRate", p.Driver.YawRate.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
-					e.SetAttribute("physics", p.Driver.PhysicsEnabled ? "true" : "false");
+					Quaternion q = p.Rb.rotation;
+					e.SetAttribute("qx", q.x.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+					e.SetAttribute("qy", q.y.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+					e.SetAttribute("qz", q.z.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+					e.SetAttribute("qw", q.w.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+					e.SetAttribute("physics", p.Driver.PhysicsEnabled || p.Driver.RestorePending && p.Driver.PendingPhysics ? "true" : "false");
 				}
-				doc.Save(path);
+				string tmp = path + ".tmp";
+				doc.Save(tmp);
+				if (File.Exists(path)) File.Replace(tmp, path, null); else File.Move(tmp, path);
 			}
 			catch (System.Exception ex) { Log.Error("[SubLevel] Could not save sublevel metadata: " + ex); }
 		}
@@ -417,30 +485,41 @@ namespace SubLevelPhysics
 		private static void LoadMetadata(World world)
 		{
 			string path = MetadataPath; if (!File.Exists(path)) return;
-			try
+			XmlDocument doc = new XmlDocument();
+			try { doc.Load(path); }
+			catch (System.Exception ex)
 			{
-				XmlDocument doc = new XmlDocument(); doc.Load(path);
-				foreach (XmlNode n in doc.SelectNodes("/SubLevels/SubLevel"))
+				metadataUnreadable = true; // keep the file as it is: overwriting or deleting it would orphan every sublevel
+				Log.Error("[SubLevel] Could not read " + path + " - sublevels not restored and the file will not be touched this session: " + ex.Message);
+				return;
+			}
+			int failed = 0;
+			foreach (XmlNode n in doc.SelectNodes("/SubLevels/SubLevel"))
+			{
+				XmlElement e = n as XmlElement; if (e == null) continue;
+				string id = e.GetAttribute("id");
+				try
 				{
-					XmlElement e = n as XmlElement; if (e == null) continue;
 					int cx = int.Parse(e.GetAttribute("cx")), cz = int.Parse(e.GetAttribute("cz")), size = int.Parse(e.GetAttribute("size"));
-					string id = e.GetAttribute("id");
 					string result = CreateInternal(cx, cz, "cobblestoneShapes:cube", size, id, true, false);
 					Plot p = FindById(id);
-					if (p == null) { Log.Warning("[SubLevel] Could not restore " + id + ": " + result); continue; }
-					float x = float.Parse(e.GetAttribute("x"), System.Globalization.CultureInfo.InvariantCulture);
-					float y = float.Parse(e.GetAttribute("y"), System.Globalization.CultureInfo.InvariantCulture);
-					float z = float.Parse(e.GetAttribute("z"), System.Globalization.CultureInfo.InvariantCulture);
-					float yaw = float.Parse(e.GetAttribute("yaw"), System.Globalization.CultureInfo.InvariantCulture);
-					p.Driver.SetPose(new Vector3(x, y, z), yaw);
-					float vx = ParseOptional(e, "vx"), vy = ParseOptional(e, "vy"), vz = ParseOptional(e, "vz");
-					if (bool.TryParse(e.GetAttribute("physics"), out bool physics)) p.Driver.SetPhysics(physics);
-					p.Driver.RestoreMotion(new Vector3(vx, vy, vz), ParseOptional(e, "yawRate"));
+					if (p == null) { failed++; Log.Warning("[SubLevel] Could not restore " + id + ": " + result); continue; }
+					Vector3 pos = new Vector3(ParseOptional(e, "x"), ParseOptional(e, "y"), ParseOptional(e, "z"));
+					float yaw = ParseOptional(e, "yaw");
+					if (e.HasAttribute("qw"))
+					{
+						Quaternion q = new Quaternion(ParseOptional(e, "qx"), ParseOptional(e, "qy"), ParseOptional(e, "qz"), ParseOptional(e, "qw"));
+						if (q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w > 0.5f) p.Driver.SetPose(pos, Quaternion.Normalize(q)); else p.Driver.SetPose(pos, yaw);
+					}
+					else p.Driver.SetPose(pos, yaw);
+					bool.TryParse(e.GetAttribute("physics"), out bool physics);
+					p.Driver.RestoreWhenReady(physics, new Vector3(ParseOptional(e, "vx"), ParseOptional(e, "vy"), ParseOptional(e, "vz")), ParseOptional(e, "yawRate"));
 				}
-				if (plots.Count > 0) Current = plots[0];
-				Log.Out("[SubLevel] Restored " + plots.Count + " saved sublevel(s).");
+				catch (System.Exception ex) { failed++; Log.Error("[SubLevel] Failed to restore sublevel " + id + ": " + ex); }
 			}
-			catch (System.Exception ex) { Log.Error("[SubLevel] Failed to restore sublevels: " + ex); }
+			if (failed > 0) metadataUnreadable = true; // keep the lost entries in the file rather than dropping them on the next save
+			if (plots.Count > 0) Current = plots[0];
+			Log.Out("[SubLevel] Restored " + plots.Count + " saved sublevel(s)" + (failed > 0 ? ", " + failed + " FAILED (sublevels.xml left untouched)" : "") + ".");
 		}
 
 		private static float ParseOptional(XmlElement e, string name)

@@ -17,6 +17,13 @@ namespace SubLevelPhysics
 		public Vector3 Velocity;
 		public float YawRate;
 		public bool PhysicsEnabled { get; private set; }
+		/// <summary>Restored from the save and waiting for its chunks and the ground under it before motion resumes.</summary>
+		public bool RestorePending { get; private set; }
+		public bool PendingPhysics { get; private set; }
+		private Vector3 pendingVelocity;
+		private float pendingYawRate, pendingSince;
+		/// <summary>Pitch/roll kept under the scripted yaw (a tipped-over sublevel restored from a save stays tipped).</summary>
+		private Quaternion tilt = Quaternion.identity;
 		private Rigidbody rb;
 		internal PlotBlockColliders Colliders;
 
@@ -62,7 +69,7 @@ namespace SubLevelPhysics
 			Pose += Velocity * Time.fixedDeltaTime;
 			Yaw += YawRate * Time.fixedDeltaTime;
 			rb.MovePosition(Pose - originNow);
-			rb.MoveRotation(Quaternion.Euler(0f, Yaw, 0f));
+			rb.MoveRotation(Quaternion.Euler(0f, Yaw, 0f) * tilt);
 		}
 
 		/// <summary>Creates the block-geometry collider set for this plot. Call once, after Plot has been assigned.</summary>
@@ -120,6 +127,7 @@ namespace SubLevelPhysics
 			if (staff != null) staff.ReleaseGrab();
 			Pose = rb.position + Origin.position;
 			Yaw = rb.rotation.eulerAngles.y;
+			tilt = Quaternion.identity;
 			Velocity = Vector3.zero;
 			YawRate = 0f;
 			rb.velocity = Vector3.zero;
@@ -168,6 +176,7 @@ namespace SubLevelPhysics
 		{
 			if (PlotSpace.Current == Plot && Time.realtimeSinceStartup >= nextPersist) { nextPersist = Time.realtimeSinceStartup + 5f; PlotSpace.SaveState(); }
 			if (Colliders != null) Colliders.Tick(PhysicsEnabled, rb);
+			TickRestore();
 			Watchdog();
 		}
 
@@ -181,7 +190,10 @@ namespace SubLevelPhysics
 				" point=" + contact.point + " normal=" + contact.normal);
 		}
 
-		private void LateUpdate()
+		private void LateUpdate() { Resnap(); }
+
+		/// <summary>Keeps every displayed plot chunk object under this root at its plot offset (vanilla moves and recycles them).</summary>
+		internal void Resnap()
 		{
 			World world = GameManager.Instance != null ? GameManager.Instance.World : null;
 			ChunkCluster cc = world != null ? world.ChunkCache : null;
@@ -274,8 +286,57 @@ namespace SubLevelPhysics
 			return "collision/other(collGen=" + c.IsCollisionMeshGenerated + ")";
 		}
 
+		/// <summary>Full rotation (used when restoring a sublevel that physics left tilted).</summary>
+		public void SetPose(Vector3 p, Quaternion rotation)
+		{
+			float yaw = rotation.eulerAngles.y;
+			SetPose(p, yaw);
+			tilt = Quaternion.Inverse(Quaternion.Euler(0f, yaw, 0f)) * rotation;
+			Quaternion q = Quaternion.Euler(0f, yaw, 0f) * tilt;
+			transform.rotation = q;
+			if (rb != null) rb.rotation = q;
+		}
+
+		/// <summary>Called by the restore: hold the saved pose (kinematic) until every plot chunk is displayed with its block
+		/// colliders and the ground under the pose has collision, then resume physics and motion. Without the wait a dynamic
+		/// sublevel restored while the world is still streaming in falls through terrain that has no collider yet.</summary>
+		public void RestoreWhenReady(bool physics, Vector3 velocity, float yawRate)
+		{
+			RestorePending = true;
+			PendingPhysics = physics;
+			pendingVelocity = velocity;
+			pendingYawRate = yawRate;
+			pendingSince = Time.realtimeSinceStartup;
+		}
+
+		private void TickRestore()
+		{
+			if (!RestorePending) return;
+			World world = GameManager.Instance != null ? GameManager.Instance.World : null;
+			ChunkCluster cc = world != null ? world.ChunkCache : null;
+			if (cc == null) return;
+			bool timedOut = Time.realtimeSinceStartup - pendingSince > 90f;
+			if (!timedOut)
+			{
+				foreach (long key in Plot.Keys)
+					if (!cc.DisplayedChunkGameObjects.ContainsKey(key)) return;
+				if (Colliders == null || Colliders.PieceCount == 0) return;
+				Vector3 w = Pose;
+				Chunk ground = cc.GetChunkSync(World.toChunkXZ(Mathf.FloorToInt(w.x)), World.toChunkXZ(Mathf.FloorToInt(w.z)));
+				if (ground == null || !ground.IsCollisionMeshGenerated || !cc.DisplayedChunkGameObjects.ContainsKey(ground.Key)) return;
+			}
+			RestorePending = false;
+			string result = "";
+			if (PendingPhysics) result = SetPhysics(true);
+			if (!PendingPhysics || PhysicsEnabled) RestoreMotion(pendingVelocity, pendingYawRate);
+			Log.Out("[SubLevel] " + Plot.Id + " restore complete after " + (Time.realtimeSinceStartup - pendingSince).ToString("F1") + " s" +
+				(timedOut ? " (TIMED OUT waiting for chunks/ground)" : "") + (PendingPhysics ? ": " + result : "."));
+			PlotSpace.SaveState();
+		}
+
 		public void SetPose(Vector3 p, float yaw)
 		{
+			tilt = Quaternion.identity;
 			Pose = p; Yaw = yaw;
 			Vector3 local = p - Origin.position;
 			Quaternion q = Quaternion.Euler(0f, yaw, 0f);
