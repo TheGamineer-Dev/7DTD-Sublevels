@@ -342,20 +342,23 @@ namespace SubLevelPhysics
 		// (kinematic, velocities kept) and resumes as soon as the ground is back - as vanilla entities do in unloaded areas.
 		public bool GroundHeld { get; private set; }
 		private Vector3 heldVelocity, heldAngular;
-		private float nextGroundCheck;
+		private float nextGroundCheck, nextHeldLog;
 
 		private void TickGroundHold()
 		{
 			if (!PhysicsEnabled || RestorePending || rb == null || Plot == null) { GroundHeld = false; return; }
 			if (Time.time < nextGroundCheck) return;
 			nextGroundCheck = Time.time + 0.25f;
-			bool ready = GroundReady();
+			string why = GroundMissing();
+			bool ready = why == null;
+			if (!ready && GroundHeld && Time.time >= nextHeldLog) { nextHeldLog = Time.time + 10f; Log.Out("[SubLevel] " + Plot.Id + " still holding: " + why); }
 			if (!ready && !GroundHeld)
 			{
+				nextHeldLog = Time.time + 10f;
 				heldVelocity = rb.velocity; heldAngular = rb.angularVelocity;
 				rb.isKinematic = true;
 				GroundHeld = true;
-				Log.Out("[SubLevel] " + Plot.Id + " ground not loaded under " + Pose + ": holding the body still until it is.");
+				Log.Out("[SubLevel] " + Plot.Id + " ground not loaded under " + Pose + " (" + why + "): holding the body still until it is.");
 			}
 			else if (ready && GroundHeld)
 			{
@@ -366,22 +369,36 @@ namespace SubLevelPhysics
 			}
 		}
 
-		/// <summary>Every terrain chunk under the footprint (plus one ring) is loaded, has collision and is in the scene.</summary>
-		private bool GroundReady()
+		/// <summary>Null when every terrain chunk under the body's colliders (plus 4 m) is loaded, has collision and is in the
+		/// scene; otherwise the first chunk that is not, and why.</summary>
+		private string GroundMissing()
 		{
 			World world = GameManager.Instance != null ? GameManager.Instance.World : null;
 			ChunkCluster cc = world != null ? world.ChunkCache : null;
-			if (cc == null) return false;
-			int reach = (Plot.PlotRadius + 1) * 16;
-			int x0 = World.toChunkXZ(Mathf.FloorToInt(Pose.x) - reach), x1 = World.toChunkXZ(Mathf.FloorToInt(Pose.x) + reach);
-			int z0 = World.toChunkXZ(Mathf.FloorToInt(Pose.z) - reach), z1 = World.toChunkXZ(Mathf.FloorToInt(Pose.z) + reach);
+			if (cc == null) return "no chunk cluster";
+			// Only the chunks under what can actually touch the ground: the body's enabled colliders, plus 4 m. (The whole plot
+			// footprint plus a ring was too strict: a dedicated server keeps collision only near players, so a corner chunk
+			// 2 chunks out kept flipping between unloaded and no-collision and the body never got released - rig mp5.)
+			bool any = false;
+			Bounds b = new Bounds();
+			foreach (Collider col in GetComponentsInChildren<Collider>())
+			{
+				if (!col.enabled || col.isTrigger) continue;
+				if (!any) { b = col.bounds; any = true; } else b.Encapsulate(col.bounds);
+			}
+			if (!any) return "no colliders";
+			Vector3 lo = b.min + Origin.position - new Vector3(4f, 0f, 4f), hi = b.max + Origin.position + new Vector3(4f, 0f, 4f);
+			int x0 = World.toChunkXZ(Mathf.FloorToInt(lo.x)), x1 = World.toChunkXZ(Mathf.FloorToInt(hi.x));
+			int z0 = World.toChunkXZ(Mathf.FloorToInt(lo.z)), z1 = World.toChunkXZ(Mathf.FloorToInt(hi.z));
 			for (int cx = x0; cx <= x1; cx++)
 				for (int cz = z0; cz <= z1; cz++)
 				{
 					Chunk c = cc.GetChunkSync(cx, cz);
-					if (c == null || !c.IsCollisionMeshGenerated || !cc.DisplayedChunkGameObjects.ContainsKey(c.Key)) return false;
+					if (c == null) return "chunk " + cx + "," + cz + " not loaded";
+					if (!c.IsCollisionMeshGenerated) return "chunk " + cx + "," + cz + " has no collision mesh";
+					if (!cc.DisplayedChunkGameObjects.ContainsKey(c.Key)) return "chunk " + cx + "," + cz + " not in the scene";
 				}
-			return true;
+			return null;
 		}
 
 		public void SetPose(Vector3 p, float yaw)
