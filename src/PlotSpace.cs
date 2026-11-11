@@ -291,31 +291,22 @@ namespace SubLevelPhysics
 		{
 			Chunk existing = cc.GetChunkSync(key);
 			if (existing != null) return; // already loaded: retain blocks, damage, tile entities and inventories
-			// Saved sublevel chunk on disk (a reload): load it the way ChunkProviderGenerateWorld.GenerateSingleChunk does.
-			// Building a blank chunk here would hide the saved one and the next save would overwrite it.
-			Chunk c = null;
-			RegionFileManager rfm = Regions(cc);
-			if (rfm != null && rfm.ContainsChunkSync(key))
+			// Saved sublevel chunk on disk (a reload): leave it to the chunk provider, which loads it from the region files on
+			// its own thread once the observers ask for it. Building a blank chunk here would hide the saved one (the next
+			// save overwrites it), and reading the region files from this (main) thread races the provider's reader.
+			if (OnDisk(cc, key))
 			{
-				c = rfm.GetChunkSync(key);
-				if (c != null) rfm.RemoveChunkSync(key);
+				Log.Out("[SubLevel] chunk " + WorldChunkCache.extractX(key) + "," + WorldChunkCache.extractZ(key) + " of sublevel " + plot.Id + " is saved: the chunk provider loads it.");
+				return;
 			}
-			bool loaded = c != null;
-			if (!loaded)
-			{
-				c = MemoryPools.PoolChunks.AllocSync(true);
-				c.X = WorldChunkCache.extractX(key);
-				c.Z = WorldChunkCache.extractZ(key);
-			}
+			Chunk c = MemoryPools.PoolChunks.AllocSync(true);
+			c.X = WorldChunkCache.extractX(key);
+			c.Z = WorldChunkCache.extractZ(key);
 			c.NeedsDecoration = false;      // lighting of a neighbour requires IsNeighbourChunksDecorated
 			c.NeedsLightDecoration = false;
-			if (!loaded)
-			{
-				c.ResetStability();
-				c.RefreshSunlight();
-				if (c.X == plot.Cx && c.Z == plot.Cz && !string.IsNullOrEmpty(bv.Block.GetBlockName())) FillTestCube(c, bv);
-			}
-			else Log.Out("[SubLevel] loaded saved chunk " + c.X + "," + c.Z + " for sublevel " + plot.Id + " from the region files.");
+			c.ResetStability();
+			c.RefreshSunlight();
+			if (c.X == plot.Cx && c.Z == plot.Cz && !string.IsNullOrEmpty(bv.Block.GetBlockName())) FillTestCube(c, bv);
 			if (support && IsOuterRing(c, plot))
 			{
 				// The outermost ring can never be lit (its own neighbours would have to exist too). It only has to exist,
@@ -330,7 +321,7 @@ namespace SubLevelPhysics
 				c.NeedsLightCalculation = true;
 				c.NeedsRegeneration = true;
 			}
-			if (!loaded) c.isModified = !support; // visible sublevel chunks are ordinary persistent world chunks
+			c.isModified = !support; // visible sublevel chunks are ordinary persistent world chunks
 			cc.AddChunkSync(c);
 		}
 
