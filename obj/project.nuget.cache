@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "/ASQrU7Fmrs=",
+  "dgSpecHash": "jx4znxvm3hE=",
   "success": true,
-  "projectFilePath": "C:\\Users\\lucia\\Desktop\\7DTD_Sublevels_ALPHA_1_2_CollisionRestore\\7DTD_Sublevels ALPHA 1_2\\SubLevelPhysics.csproj",
+  "projectFilePath": "C:\\Users\\lucia\\Desktop\\7DTD_Sublevels_ALPHA_1_3_PlayerRiding\\7DTD_Sublevels ALPHA 1_2\\SubLevelPhysics.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\lucia\\.nuget\\packages\\microsoft.netframework.referenceassemblies\\1.0.3\\microsoft.netframework.referenceassemblies.1.0.3.nupkg.sha512",
     "C:\\Users\\lucia\\.nuget\\packages\\microsoft.netframework.referenceassemblies.net48\\1.0.3\\microsoft.netframework.referenceassemblies.net48.1.0.3.nupkg.sha512"

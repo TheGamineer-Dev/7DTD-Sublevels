@@ -68,6 +68,7 @@ namespace SubLevelPhysics
 		private static bool metadataLoaded;
 		private static string MetadataPath { get { return GameIO.GetSaveGameDir() + "/sublevels.xml"; } }
 		public static IList<Plot> All { get { return plots.AsReadOnly(); } }
+		public static int Count { get { return plots.Count; } }
 
 		public static Plot FindById(string id)
 		{
@@ -359,6 +360,7 @@ namespace SubLevelPhysics
 		/// references are dropped here - no cluster calls.</summary>
 		public static void OnWorldShuttingDown()
 		{
+			PlatformRiding.Reset();
 			SaveMetadata();
 			foreach (Plot p in plots)
 			{
@@ -491,7 +493,7 @@ namespace SubLevelPhysics
 			{
 				Vector3 pos = p.Driver != null ? p.Driver.Pose : Vector3.zero;
 				float yaw = p.Driver != null ? p.Driver.Yaw : 0f;
-				sb.AppendLine("  " + p.Id + (p == Current ? " [selected]" : "") + " | chunks=" + p.Cx + "," + p.Cz + " | size=" + (p.PlotRadius * 2 + 1) + "x" + (p.PlotRadius * 2 + 1) + " | position=" + pos.ToString("F2") + " | yaw=" + yaw.ToString("F1") + " | physics=" + (p.Driver != null && p.Driver.PhysicsEnabled));
+				sb.AppendLine("  " + p.Id + (p == Current ? " [selected]" : "") + " | chunks=" + p.Cx + "," + p.Cz + " | size=" + (p.PlotRadius * 2 + 1) + "x" + (p.PlotRadius * 2 + 1) + " | position=" + pos.ToString("F2") + " | yaw=" + yaw.ToString("F1") + " | physics=" + (p.Driver != null && p.Driver.PhysicsEnabled) + (PlatformRiding.Ridden == p ? " | PLAYER ON BOARD" : ""));
 			}
 			return sb.ToString();
 		}

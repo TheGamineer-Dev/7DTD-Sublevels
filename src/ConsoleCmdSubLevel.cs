@@ -25,6 +25,7 @@ namespace SubLevelPhysics
 			       "sl move <id> (x,y,z) <speed>              move along a direction at speed\n" +
 			       "sl spin <id> <degPerSec>                  set scripted yaw rate\n" +
 			       "sl physics <id> true|false                toggle dynamic Rigidbody physics for ONE sublevel\n" +
+			       "sl ride [true|false]                     show/toggle the player riding (moving + turning with) sublevels they stand on\n" +
 			       "sl set <id> <block> <dx> <dy> <dz> [rot]  place a block relative to that sublevel\n" +
 			       "sl status [id]                            inspect one sublevel or list all\n" +
 			       "sl mat <id>                               dump that sublevel's materials\n" +
@@ -112,6 +113,13 @@ namespace SubLevelPhysics
 					if (p.Count != 3 || !TryFloat(p[2], out float rate)) { con.Output("Usage: sl spin <id> <degPerSec>"); break; }
 					if (plot.Driver.PhysicsEnabled) { con.Output("Scripted spin is unavailable while physics is enabled."); break; }
 					plot.Driver.YawRate = rate; PlotSpace.SaveState(); con.Output("Yaw rate set for " + plot.Id + "."); break;
+				}
+				case "ride":
+				{
+					if (p.Count == 2 && bool.TryParse(p[1], out bool ride)) PlatformRiding.Enabled = ride;
+					else if (p.Count != 1) { con.Output("Usage: sl ride [true|false]"); break; }
+					con.Output("Player riding of sublevels is " + (PlatformRiding.Enabled ? "ENABLED" : "DISABLED") + (PlatformRiding.Ridden != null ? " (currently on sublevel " + PlatformRiding.Ridden.Id + ")" : "") + ".");
+					break;
 				}
 				case "physics":
 				{

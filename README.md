@@ -22,6 +22,7 @@ Copy the resulting `bin\SubLevelPhysics\SubLevelPhysics.dll` into the mod's `Sub
 - `sl move <id> (x,y,z) <speed>` — move along a direction at the requested speed.
 - `sl spin <id> <degreesPerSecond>` — set scripted yaw rate.
 - `sl physics <id> true|false` — toggle dynamic Rigidbody physics on exactly that sublevel.
+- `sl ride [true|false]` — show or toggle player riding (see below).
 - `sl set <id> <block> <dx> <dy> <dz> [rotation]` — place a block relative to that sublevel's pivot.
 - `sl status [id]` — list sublevels, or inspect the requested one.
 - `sl mat <id>` — dump materials for that sublevel.
@@ -40,3 +41,9 @@ The project must be compiled against the installed game's Managed assemblies. Th
 ## Collision rollback
 
 The kinematic one-way collision model introduced after Alpha 1.0 made sublevels fall through terrain (kinematic bodies do not collide with static terrain colliders). `PlotDriver` physics and the Physics Staff are restored to the Alpha 1.0 dynamic-Rigidbody behavior; commands, multi-sublevel support and persistence are unchanged. The layer-16 collision-matrix override is now reference-counted so several physics sublevels can coexist.
+
+## Player riding
+
+Standing on a sublevel carries the local player with it, including yaw (the camera turns with the sublevel), and stepping or jumping off hands over the sublevel's momentum. This arms the UFPS moving-platform support already inside `vp_FPController` (dormant in 7DTD because it only triggers for layer 28 ground) by pointing its `m_Platform` at the sublevel root when the ground belongs to a sublevel. See `src/PlatformRiding.cs`. Use `sl ride false` to disable it for comparison. `sl list` flags the sublevel the player is on.
+
+Known limits: local player only (other entities and remote players are not carried); third-person orbit camera does not rotate with the sublevel; between physics ticks the player is not interpolated with the sublevel, so very fast sublevels may show slight visual jitter.

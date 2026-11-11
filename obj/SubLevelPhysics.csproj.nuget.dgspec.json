@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\lucia\\Desktop\\7DTD_Sublevels_ALPHA_1_2_CollisionRestore\\7DTD_Sublevels ALPHA 1_2\\SubLevelPhysics.csproj": {}
+    "C:\\Users\\lucia\\Desktop\\7DTD_Sublevels_ALPHA_1_3_PlayerRiding\\7DTD_Sublevels ALPHA 1_2\\SubLevelPhysics.csproj": {}
   },
   "projects": {
-    "C:\\Users\\lucia\\Desktop\\7DTD_Sublevels_ALPHA_1_2_CollisionRestore\\7DTD_Sublevels ALPHA 1_2\\SubLevelPhysics.csproj": {
+    "C:\\Users\\lucia\\Desktop\\7DTD_Sublevels_ALPHA_1_3_PlayerRiding\\7DTD_Sublevels ALPHA 1_2\\SubLevelPhysics.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\lucia\\Desktop\\7DTD_Sublevels_ALPHA_1_2_CollisionRestore\\7DTD_Sublevels ALPHA 1_2\\SubLevelPhysics.csproj",
+        "projectUniqueName": "C:\\Users\\lucia\\Desktop\\7DTD_Sublevels_ALPHA_1_3_PlayerRiding\\7DTD_Sublevels ALPHA 1_2\\SubLevelPhysics.csproj",
         "projectName": "SubLevelPhysics",
-        "projectPath": "C:\\Users\\lucia\\Desktop\\7DTD_Sublevels_ALPHA_1_2_CollisionRestore\\7DTD_Sublevels ALPHA 1_2\\SubLevelPhysics.csproj",
+        "projectPath": "C:\\Users\\lucia\\Desktop\\7DTD_Sublevels_ALPHA_1_3_PlayerRiding\\7DTD_Sublevels ALPHA 1_2\\SubLevelPhysics.csproj",
         "packagesPath": "C:\\Users\\lucia\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\lucia\\Desktop\\7DTD_Sublevels_ALPHA_1_2_CollisionRestore\\7DTD_Sublevels ALPHA 1_2\\obj\\",
+        "outputPath": "C:\\Users\\lucia\\Desktop\\7DTD_Sublevels_ALPHA_1_3_PlayerRiding\\7DTD_Sublevels ALPHA 1_2\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\lucia\\AppData\\Roaming\\NuGet\\NuGet.Config"
