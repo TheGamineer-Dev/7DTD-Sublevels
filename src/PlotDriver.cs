@@ -351,6 +351,17 @@ namespace SubLevelPhysics
 
 		/// <summary>Applies saved velocities when a sublevel is restored from sublevels.xml. In dynamic
 		/// mode the Rigidbody owns velocity, so it must be pushed into the body (FixedUpdate mirrors it back).</summary>
+		/// <summary>Client copy (multiplayer): follow the server's pose. Between packets FixedUpdate carries it on with the
+		/// server's velocity, so a packet usually only corrects a little; a big jump (first packet, teleport) snaps.</summary>
+		internal void ApplyRemote(Vector3 pos, Quaternion rot, Vector3 vel, float yawRate, bool snap)
+		{
+			Velocity = vel; YawRate = yawRate;
+			float yaw = rot.eulerAngles.y;
+			if (snap || (pos - Pose).sqrMagnitude > 4f) { SetPose(pos, rot); return; }
+			tilt = Quaternion.Inverse(Quaternion.Euler(0f, yaw, 0f)) * rot;
+			Pose = pos; Yaw = yaw;
+		}
+
 		public void RestoreMotion(Vector3 velocity, float yawRateDegPerSec)
 		{
 			Velocity = velocity; YawRate = yawRateDegPerSec;
