@@ -51,6 +51,9 @@ namespace SubLevelPhysics
 		{
 			SdtdConsole con = SingletonMonoBehaviour<SdtdConsole>.Instance;
 			string sub = p.Count > 0 ? p[0].ToLowerInvariant() : "help";
+			// On a dedicated server there is no primary player: place relative to whoever typed the command.
+			PlotSpace.Caller = info.RemoteClientInfo != null && GameManager.Instance.World != null
+				? GameManager.Instance.World.GetEntity(info.RemoteClientInfo.entityId) as EntityPlayer : null;
 			switch (sub)
 			{
 				case "plot":
@@ -78,8 +81,8 @@ namespace SubLevelPhysics
 				case "here":
 				{
 					Plot plot = RequirePlot(p, 1, con); if (plot == null) break;
-					EntityPlayerLocal pl = GameManager.Instance.World.GetPrimaryPlayer();
-					if (pl == null) { con.Output("No local player."); break; }
+					EntityPlayer pl = PlotSpace.Caller != null ? PlotSpace.Caller : GameManager.Instance.World.GetPrimaryPlayer();
+					if (pl == null) { con.Output("No player to place it in front of (on a dedicated server, run it from a client)."); break; }
 					Vector3 pos = PlotSpace.PosInFront(pl); plot.Driver.SetPose(pos, 0f); PlotSpace.SaveState();
 					con.Output("Sublevel " + plot.Id + " posed at " + pos); break;
 				}

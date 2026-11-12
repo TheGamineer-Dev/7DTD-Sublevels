@@ -36,6 +36,10 @@ namespace SubLevelPhysics
 		public PlotDriver Driver;
 		public System.Action<Chunk> OnInit, OnRegen, OnCopied;
 		public float CreatedAt;
+		/// <summary>Client copy of a server sublevel (multiplayer): no chunks or save of its own, pose from the server.</summary>
+		public bool Remote;
+		/// <summary>Server: one chunk observer per connected player, so vanilla streams this plot's chunks to them.</summary>
+		public readonly Dictionary<int, ChunkManager.ChunkObserver> ClientObservers = new Dictionary<int, ChunkManager.ChunkObserver>();
 
 		public Vector3 PivotV { get { return new Vector3(Pivot.x, Pivot.y, Pivot.z); } }
 
@@ -227,6 +231,31 @@ namespace SubLevelPhysics
 			// View observer covers only the requested visible footprint; these chunks are meshed and collided.
 			plot.ViewObserver = world.m_ChunkManager.AddChunkObserver(obsPos, true, plot.PlotRadius - 1, -1);
 
+			AttachRuntime(world, plot);
+
+			plots.Add(plot);
+			Publish();
+			Current = plot;
+			Log.Out("[SubLevel] Plot " + plot.Id + " created: centre chunk " + cx + "," + cz + ", footprint=" + sizeChunks + "x" + sizeChunks +
+				" chunks, " + plot.Keys.Count + " plot chunks + " + plot.SupportKeys.Count + " support chunks, pivot " + plot.Pivot + ", clusterFixedSize=" + cc.IsFixedSize);
+
+			// Put it somewhere visible straight away (otherwise it sits at world origin).
+			EntityPlayer pl = Caller != null ? Caller : world.GetPrimaryPlayer();
+			string where = " Run 'sl here' to place it.";
+			if (poseInFront && pl != null)
+			{
+				Vector3 truePos = PosInFront(pl);
+				plot.Driver.SetPose(truePos, 0f);
+				where = " Posed at " + truePos + ".";
+			}
+			if (!restoring) SaveMetadata();
+			return "Sublevel " + plot.Id + " created at chunk " + cx + "," + cz + " with a " + sizeChunks + "x" + sizeChunks +
+				" chunk footprint (pivot " + plot.Pivot + ")." + where + " Chunks need a second or two to light and mesh; run 'sl status' and check [SubLevel] lines in output_log.txt.";
+		}
+
+		/// <summary>Root object, kinematic body, driver, block colliders and the chunk-pipeline hooks (server plots and client copies).</summary>
+		private static void AttachRuntime(World world, Plot plot)
+		{
 			plot.RootGo = new GameObject("SubLevelRoot");
 			// Register the entire physics root as a floating-origin object. Level -1 moves
 			// the root transform itself (including its Rigidbody and all chunk children).
@@ -242,7 +271,7 @@ namespace SubLevelPhysics
 			plot.Driver.Plot = plot;
 			// Collision is built from the plot's BLOCKS (see PlotBlockColliders), starting with the blocks already placed above.
 			plot.Driver.InitColliders();
-			plot.RootGo.AddComponent<PhysicsStaffController>();
+			if (!plot.Remote) plot.RootGo.AddComponent<PhysicsStaffController>();
 			plot.CreatedAt = Time.realtimeSinceStartup;
 
 			// Pipeline transition logging (these callbacks fire on the lighting / regen / main threads).
@@ -257,29 +286,57 @@ namespace SubLevelPhysics
 			world.m_ChunkManager.OnChunkInitialized += plot.OnInit;
 			world.m_ChunkManager.OnChunkRegenerated += plot.OnRegen;
 			world.m_ChunkManager.OnChunkCopiedToUnity += plot.OnCopied;
+		}
 
+		/// <summary>The player a console command came from (a client on a dedicated server), else null: then the host's player.</summary>
+		internal static EntityPlayer Caller;
+
+		/// <summary>Client: the server's sublevel packets are applied only once this world is set up here (OnGameUpdate).</summary>
+		internal static bool ClientReady(World w) { return w != null && loadedWorld == w && metadataLoaded; }
+
+		/// <summary>Client: a local copy of a server sublevel. The chunks come from the server; this only draws, collides and follows the pose.</summary>
+		internal static Plot CreateRemote(string id, int cx, int cz, int radius)
+		{
+			World world = GameManager.Instance != null ? GameManager.Instance.World : null;
+			if (world == null || world.ChunkCache == null) return null;
+			var plot = new Plot { Id = id, Cx = cx, Cz = cz, PlotRadius = radius, Pivot = new Vector3i(cx * 16 + 7, 100, cz * 16 + 7), Remote = true };
+			for (int dx = -plot.StageRadius; dx <= plot.StageRadius; dx++)
+				for (int dz = -plot.StageRadius; dz <= plot.StageRadius; dz++)
+				{
+					bool inner = System.Math.Abs(dx) <= plot.PlotRadius && System.Math.Abs(dz) <= plot.PlotRadius;
+					(inner ? plot.Keys : plot.SupportKeys).Add(WorldChunkCache.MakeChunkKey(cx + dx, cz + dz));
+				}
+			// The client's mesher only draws chunks inside a local observer with visual meshes on (ChunkManager.DetermineChunksToLoad);
+			// on a client an observer never loads or unloads anything, the server does that.
+			plot.ViewObserver = world.m_ChunkManager.AddChunkObserver(new Vector3(cx * 16 + 8, 0f, cz * 16 + 8), true, plot.PlotRadius - 1, -1);
+			AttachRuntime(world, plot);
 			plots.Add(plot);
 			Publish();
-			Current = plot;
-			Log.Out("[SubLevel] Plot " + plot.Id + " created: centre chunk " + cx + "," + cz + ", footprint=" + sizeChunks + "x" + sizeChunks +
-				" chunks, " + plot.Keys.Count + " plot chunks + " + plot.SupportKeys.Count + " support chunks, pivot " + plot.Pivot + ", clusterFixedSize=" + cc.IsFixedSize);
+			Log.Out("[SubLevel] MP: client copy of sublevel " + id + " at chunk " + cx + "," + cz + " (radius " + radius + ")");
+			return plot;
+		}
 
-			// Put it somewhere visible straight away (otherwise it sits at world origin).
-			EntityPlayerLocal pl = world.GetPrimaryPlayer();
-			string where = " Run 'sl here' to place it.";
-			if (poseInFront && pl != null)
+		internal static void DestroyRemote(Plot p)
+		{
+			plots.Remove(p);
+			Publish();
+			if (Current == p) Current = null;
+			if (p.Driver != null) p.Driver.DetachAll();
+			if (p.RootGo != null) { Origin.Remove(p.RootGo.transform); Object.Destroy(p.RootGo); }
+			World world = GameManager.Instance != null ? GameManager.Instance.World : null;
+			if (world != null)
 			{
-				Vector3 truePos = PosInFront(pl);
-				plot.Driver.SetPose(truePos, 0f);
-				where = " Posed at " + truePos + ".";
+				ChunkManager cm = world.m_ChunkManager;
+				cm.OnChunkInitialized -= p.OnInit;
+				cm.OnChunkRegenerated -= p.OnRegen;
+				cm.OnChunkCopiedToUnity -= p.OnCopied;
+				if (p.ViewObserver != null) cm.RemoveChunkObserver(p.ViewObserver);
 			}
-			if (!restoring) SaveMetadata();
-			return "Sublevel " + plot.Id + " created at chunk " + cx + "," + cz + " with a " + sizeChunks + "x" + sizeChunks +
-				" chunk footprint (pivot " + plot.Pivot + ")." + where + " Chunks need a second or two to light and mesh; run 'sl status' and check [SubLevel] lines in output_log.txt.";
+			Log.Out("[SubLevel] MP: client copy of sublevel " + p.Id + " removed (the server no longer lists it)");
 		}
 
 		/// <summary>True-world position 6 m in front of the player, 1 m above their feet.</summary>
-		public static Vector3 PosInFront(EntityPlayerLocal pl)
+		public static Vector3 PosInFront(EntityPlayer pl)
 		{
 			Vector3 fwd = pl.transform.forward; fwd.y = 0f;
 			if (fwd.sqrMagnitude < 1e-4f) fwd = Vector3.forward;
@@ -358,7 +415,8 @@ namespace SubLevelPhysics
 			if (!p.ContainsXZ(pos.x, pos.z)) return "Position " + pos + " is outside the visible plot footprint.";
 			BlockValue bv = block.ToBlockValue();
 			bv.rotation = (byte)rotation;
-			world.SetBlock(pos, bv, true, true);
+			// Through the game's own RPC: applied here AND sent to every client that has the chunk (world.SetBlock is local only).
+			GameManager.Instance.SetBlocksRPC(new List<BlockChangeInfo> { new BlockChangeInfo(new BlockValueRef(pos), bv, true) });
 			Chunk changed = world.ChunkCache.GetChunkSync(pos.x >> 4, pos.z >> 4); if (changed != null) changed.isModified = true;
 			SaveMetadata();
 			return "Set " + block.GetBlockName() + " rot " + rotation + " at plot block " + pos + ".";
@@ -388,6 +446,8 @@ namespace SubLevelPhysics
 			cm.OnChunkCopiedToUnity -= p.OnCopied;
 			if (p.ViewObserver != null) cm.RemoveChunkObserver(p.ViewObserver);
 			if (p.SupportObserver != null) cm.RemoveChunkObserver(p.SupportObserver);
+			foreach (ChunkManager.ChunkObserver o in p.ClientObservers.Values) cm.RemoveChunkObserver(o);
+			p.ClientObservers.Clear();
 
 			ChunkCluster cc = world.ChunkCache;
 			if (cc != null)
@@ -432,7 +492,7 @@ namespace SubLevelPhysics
 			World world = GameManager.Instance != null ? GameManager.Instance.World : null;
 			if (world == null || world.ChunkCache == null) return;
 			if (loadedWorld != world) { loadedWorld = world; metadataLoaded = false; metadataUnreadable = false; plots.Clear(); Publish(); Current = null; }
-			if (metadataLoaded) return;
+			if (metadataLoaded) { MpSync.Tick(world); return; }
 			// Not during world load: the chunk provider / region files are not ready and nothing under the saved poses has
 			// collision yet. Sublevels live on the server (single player = host); a remote client never builds them.
 			GameManager gm = GameManager.Instance;
@@ -447,6 +507,8 @@ namespace SubLevelPhysics
 
 		private static void SaveMetadata()
 		{
+			ConnectionManager cmSave = SingletonMonoBehaviour<ConnectionManager>.Instance;
+			if (cmSave != null && !cmSave.IsServer) return;   // a client's copies are the server's to save
 			if (loadedWorld == null || !metadataLoaded || metadataUnreadable) return;
 			try
 			{

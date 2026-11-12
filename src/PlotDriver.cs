@@ -177,6 +177,7 @@ namespace SubLevelPhysics
 			if (PlotSpace.Current == Plot && Time.realtimeSinceStartup >= nextPersist) { nextPersist = Time.realtimeSinceStartup + 5f; PlotSpace.SaveState(); }
 			if (Colliders != null) Colliders.Tick(PhysicsEnabled, rb);
 			TickRestore();
+			TickGroundHold();
 			Watchdog();
 		}
 
@@ -334,6 +335,72 @@ namespace SubLevelPhysics
 			PlotSpace.SaveState();
 		}
 
+		// --- ground hold --------------------------------------------------------------------------------------------------
+		// A dynamic sublevel keeps simulating when nobody is near it, but the server unloads the terrain there (and with it
+		// the collision). Multiplayer rig mp3 (11-11): a dropped sublevel left alone while its player was away fell to
+		// y -4760. So while any terrain chunk under the footprint is missing or has no collision, the body is frozen
+		// (kinematic, velocities kept) and resumes as soon as the ground is back - as vanilla entities do in unloaded areas.
+		public bool GroundHeld { get; private set; }
+		private Vector3 heldVelocity, heldAngular;
+		private float nextGroundCheck, nextHeldLog;
+
+		private void TickGroundHold()
+		{
+			if (!PhysicsEnabled || RestorePending || rb == null || Plot == null) { GroundHeld = false; return; }
+			if (Time.time < nextGroundCheck) return;
+			nextGroundCheck = Time.time + 0.25f;
+			string why = GroundMissing();
+			bool ready = why == null;
+			if (!ready && GroundHeld && Time.time >= nextHeldLog) { nextHeldLog = Time.time + 10f; Log.Out("[SubLevel] " + Plot.Id + " still holding: " + why); }
+			if (!ready && !GroundHeld)
+			{
+				nextHeldLog = Time.time + 10f;
+				heldVelocity = rb.velocity; heldAngular = rb.angularVelocity;
+				rb.isKinematic = true;
+				GroundHeld = true;
+				Log.Out("[SubLevel] " + Plot.Id + " ground not loaded under " + Pose + " (" + why + "): holding the body still until it is.");
+			}
+			else if (ready && GroundHeld)
+			{
+				rb.isKinematic = false;
+				rb.velocity = heldVelocity; rb.angularVelocity = heldAngular;
+				GroundHeld = false;
+				Log.Out("[SubLevel] " + Plot.Id + " ground is back under " + Pose + ": physics resumed.");
+			}
+		}
+
+		/// <summary>Null when every terrain chunk under the body's colliders (plus 4 m) is loaded, has collision and is in the
+		/// scene; otherwise the first chunk that is not, and why.</summary>
+		private string GroundMissing()
+		{
+			World world = GameManager.Instance != null ? GameManager.Instance.World : null;
+			ChunkCluster cc = world != null ? world.ChunkCache : null;
+			if (cc == null) return "no chunk cluster";
+			// Only the chunks under what can actually touch the ground: the body's enabled colliders, plus 4 m. (The whole plot
+			// footprint plus a ring was too strict: a dedicated server keeps collision only near players, so a corner chunk
+			// 2 chunks out kept flipping between unloaded and no-collision and the body never got released - rig mp5.)
+			bool any = false;
+			Bounds b = new Bounds();
+			foreach (Collider col in GetComponentsInChildren<Collider>())
+			{
+				if (!col.enabled || col.isTrigger) continue;
+				if (!any) { b = col.bounds; any = true; } else b.Encapsulate(col.bounds);
+			}
+			if (!any) return "no colliders";
+			Vector3 lo = b.min + Origin.position - new Vector3(4f, 0f, 4f), hi = b.max + Origin.position + new Vector3(4f, 0f, 4f);
+			int x0 = World.toChunkXZ(Mathf.FloorToInt(lo.x)), x1 = World.toChunkXZ(Mathf.FloorToInt(hi.x));
+			int z0 = World.toChunkXZ(Mathf.FloorToInt(lo.z)), z1 = World.toChunkXZ(Mathf.FloorToInt(hi.z));
+			for (int cx = x0; cx <= x1; cx++)
+				for (int cz = z0; cz <= z1; cz++)
+				{
+					Chunk c = cc.GetChunkSync(cx, cz);
+					if (c == null) return "chunk " + cx + "," + cz + " not loaded";
+					if (!c.IsCollisionMeshGenerated) return "chunk " + cx + "," + cz + " has no collision mesh";
+					if (!cc.DisplayedChunkGameObjects.ContainsKey(c.Key)) return "chunk " + cx + "," + cz + " not in the scene";
+				}
+			return null;
+		}
+
 		public void SetPose(Vector3 p, float yaw)
 		{
 			tilt = Quaternion.identity;
@@ -351,6 +418,17 @@ namespace SubLevelPhysics
 
 		/// <summary>Applies saved velocities when a sublevel is restored from sublevels.xml. In dynamic
 		/// mode the Rigidbody owns velocity, so it must be pushed into the body (FixedUpdate mirrors it back).</summary>
+		/// <summary>Client copy (multiplayer): follow the server's pose. Between packets FixedUpdate carries it on with the
+		/// server's velocity, so a packet usually only corrects a little; a big jump (first packet, teleport) snaps.</summary>
+		internal void ApplyRemote(Vector3 pos, Quaternion rot, Vector3 vel, float yawRate, bool snap)
+		{
+			Velocity = vel; YawRate = yawRate;
+			float yaw = rot.eulerAngles.y;
+			if (snap || (pos - Pose).sqrMagnitude > 4f) { SetPose(pos, rot); return; }
+			tilt = Quaternion.Inverse(Quaternion.Euler(0f, yaw, 0f)) * rot;
+			Pose = pos; Yaw = yaw;
+		}
+
 		public void RestoreMotion(Vector3 velocity, float yawRateDegPerSec)
 		{
 			Velocity = velocity; YawRate = yawRateDegPerSec;
