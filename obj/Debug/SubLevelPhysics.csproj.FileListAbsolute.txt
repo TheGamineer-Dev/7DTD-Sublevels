@@ -10,3 +10,16 @@ C:\Users\lucia\Downloads\Sublevels-MultiWorld-Rework-alpha-0.5.0-storage-diagnos
 C:\Users\lucia\Downloads\Sublevels-MultiWorld-Rework-alpha-0.5.0-storage-diagnostics-from-compiling-baseline\sublevels_diag_work\Sublevels-MultiWorld-Rework-alpha-0.5.0\obj\Debug\SubLevelPhysics.pdb
 C:\Users\lucia\Downloads\Sublevels-MultiWorld-Rework-alpha-0.5.0-storage-diagnostics-from-compiling-baseline\sublevels_diag_work\Sublevels-MultiWorld-Rework-alpha-0.5.0\bin\SubLevelPhysics\Config\items.xml
 C:\Users\lucia\Downloads\Sublevels-MultiWorld-Rework-alpha-0.5.0-storage-diagnostics-from-compiling-baseline\sublevels_diag_work\Sublevels-MultiWorld-Rework-alpha-0.5.0\bin\SubLevelPhysics\Config\Localization.txt
+C:\Users\lucia\Desktop\7DTD_Sublevel-physics Mod Workspace\Multiworlds-branch ALPHA 1_0\Sublevels Multiworlds-branch ALPHA 1_0\obj\Debug\SubLevelPhysics.csproj.AssemblyReference.cache
+C:\Users\lucia\Desktop\7DTD_Sublevel-physics Mod Workspace\Multiworlds-branch ALPHA 1_0\Sublevels Multiworlds-branch ALPHA 1_0\obj\Debug\SubLevelPhysics.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\lucia\Desktop\7DTD_Sublevel-physics Mod Workspace\Multiworlds-branch ALPHA 1_0\Sublevels Multiworlds-branch ALPHA 1_0\obj\Debug\SubLevelPhysics.csproj.CoreCompileInputs.cache
+C:\Users\lucia\Desktop\7DTD_Sublevel-physics Mod Workspace\Multiworlds-branch ALPHA 1_0\Sublevels Multiworlds-branch ALPHA 1_0\obj\Debug\SubLevelPhysics.sourcelink.json
+C:\Users\lucia\Desktop\7DTD_Sublevel-physics Mod Workspace\Multiworlds-branch ALPHA 1_0\Sublevels Multiworlds-branch ALPHA 1_0\obj\Debug\SubLevelPhysics.dll
+C:\Users\lucia\Desktop\7DTD_Sublevel-physics Mod Workspace\Multiworlds-branch ALPHA 1_0\Sublevels Multiworlds-branch ALPHA 1_0\obj\Debug\SubLevelPhysics.pdb
+C:\Users\lucia\Desktop\7DTD_Sublevel-physics Mod Workspace\Multiworlds-branch ALPHA 1_0\Sublevels Multiworlds-branch ALPHA 1_0\bin\SubLevelPhysics\Config\items.xml
+C:\Users\lucia\Desktop\7DTD_Sublevel-physics Mod Workspace\Multiworlds-branch ALPHA 1_0\Sublevels Multiworlds-branch ALPHA 1_0\bin\SubLevelPhysics\Config\Localization.txt
+C:\Users\lucia\Desktop\7DTD_Sublevel-physics Mod Workspace\Multiworlds-branch ALPHA 1_0\Sublevels Multiworlds-branch ALPHA 1_0\bin\SubLevelPhysics\Config\multiworldserverconfig.Sublevels.example.xml
+C:\Users\lucia\Desktop\7DTD_Sublevel-physics Mod Workspace\Multiworlds-branch ALPHA 1_0\Sublevels Multiworlds-branch ALPHA 1_0\bin\SubLevelPhysics\ModInfo.xml
+C:\Users\lucia\Desktop\7DTD_Sublevel-physics Mod Workspace\Multiworlds-branch ALPHA 1_0\Sublevels Multiworlds-branch ALPHA 1_0\bin\SubLevelPhysics\README.md
+C:\Users\lucia\Desktop\7DTD_Sublevel-physics Mod Workspace\Multiworlds-branch ALPHA 1_0\Sublevels Multiworlds-branch ALPHA 1_0\bin\SubLevelPhysics\SubLevelPhysics.dll
+C:\Users\lucia\Desktop\7DTD_Sublevel-physics Mod Workspace\Multiworlds-branch ALPHA 1_0\Sublevels Multiworlds-branch ALPHA 1_0\bin\SubLevelPhysics\SubLevelPhysics.pdb

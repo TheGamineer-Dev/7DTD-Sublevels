@@ -19,6 +19,7 @@
     <Reference Include="UnityEngine"><HintPath>$(Managed)\\UnityEngine.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="LogLibrary"><HintPath>$(Managed)\\LogLibrary.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="0Harmony"><HintPath>$(GameDir)\\Mods\\0_TFP_Harmony\\0Harmony.dll</HintPath><Private>false</Private></Reference>
+	<Reference Include="UnityEngine.AnimationModule"><HintPath>$(Managed)\UnityEngine.AnimationModule.dll</HintPath><Private>false</Private></Reference>
   </ItemGroup>
   <ItemGroup>
     <None Update="ModInfo.xml" CopyToOutputDirectory="PreserveNewest" />
