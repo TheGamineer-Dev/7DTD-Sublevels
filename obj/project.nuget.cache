@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "jx4znxvm3hE=",
+  "dgSpecHash": "ghA8VsH26us=",
   "success": true,
-  "projectFilePath": "C:\\Users\\lucia\\Desktop\\7DTD_Sublevels_ALPHA_1_3_PlayerRiding\\7DTD_Sublevels ALPHA 1_2\\SubLevelPhysics.csproj",
+  "projectFilePath": "C:\\Users\\lucia\\Downloads\\Sublevels-MultiWorld-Rework-alpha-0.5.0-storage-diagnostics-from-compiling-baseline\\sublevels_diag_work\\Sublevels-MultiWorld-Rework-alpha-0.5.0\\SubLevelPhysics.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\lucia\\.nuget\\packages\\microsoft.netframework.referenceassemblies\\1.0.3\\microsoft.netframework.referenceassemblies.1.0.3.nupkg.sha512",
     "C:\\Users\\lucia\\.nuget\\packages\\microsoft.netframework.referenceassemblies.net48\\1.0.3\\microsoft.netframework.referenceassemblies.net48.1.0.3.nupkg.sha512"

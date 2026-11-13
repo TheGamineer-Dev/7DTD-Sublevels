@@ -20,11 +20,11 @@ namespace SubLevelPhysics
 		/// <summary>Master switch ('sl ride true|false'), for A/B testing in game.</summary>
 		public static bool Enabled = true;
 		/// <summary>The sublevel the local player is currently standing on, if any.</summary>
-		public static Plot Ridden { get; private set; }
+		public static SublevelPlot Ridden { get; private set; }
 
 		public static void Reset() { Ridden = null; }
 
-		internal static void Board(Plot p)
+		internal static void Board(SublevelPlot p)
 		{
 			if (Ridden == p) return;
 			Ridden = p;
@@ -46,16 +46,16 @@ namespace SubLevelPhysics
 	{
 		private static void Postfix(vp_FPController __instance)
 		{
-			Plot plot = null;
+			SublevelPlot plot = null;
 			if (PlatformRiding.Enabled && PlotSpace.Count > 0)
 			{
 				Transform ground = __instance.GroundTransform;
 				if (ground != null) plot = PlotSpace.FindByTransform(ground);
 			}
 
-			if (plot != null && plot.RootGo != null)
+			if (plot != null && plot.Root != null)
 			{
-				Transform root = plot.RootGo.transform;
+				Transform root = plot.Root.transform;
 				if (__instance.m_Platform != root)
 				{
 					__instance.m_Platform = root;

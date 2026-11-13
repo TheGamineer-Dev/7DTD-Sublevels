@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Merge the second World entry into the existing MultiWorld 0.7.14 config.
+     Keep the existing primary world as id=1/nativeWorld=true. -->
+<MultiWorld schemaVersion="1" storageId="replace_with_existing_storage_id" defaultWorld="Main">
+  <World id="1" name="Main" icon="1.png" nativeWorld="true">
+    <property name="GameWorld" value="RWG" />
+    <property name="GameName" value="YourExistingMainSave" />
+    <property name="WorldGenSeed" value="YourExistingSeed" />
+    <property name="WorldGenSize" value="6144" />
+    <property name="GameMode" value="GameModeSurvival" />
+  </World>
+  <World id="2" name="Sublevels" icon="2.png">
+    <property name="GameWorld" value="RWG" />
+    <property name="GameName" value="SublevelsStorage" />
+    <property name="WorldGenSeed" value="SublevelsStorageSeed" />
+    <property name="WorldGenSize" value="6144" />
+    <property name="GameMode" value="GameModeSurvival" />
+  </World>
+</MultiWorld>

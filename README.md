@@ -1,49 +1,92 @@
-# 7DTD Sublevel Physics — Alpha 1.2 command/multi-instance fix (collision restored)
+# Sublevels — MultiWorld cell-backed projections (0.5.0-alpha)
 
-Target: 7 Days to Die 3.4.0 (build compatibility target 3.40.10).
+Experimental integration phase for 7 Days to Die v3.4 and MultiWorld 0.7.14. This phase connects the cell storage API to a command-driven runtime projection. It is not yet a complete replacement for the original Sublevels gameplay systems.
 
-## Build
+## Architecture
 
-```powershell
-dotnet build .\SubLevelPhysics.csproj -p:GameDir="C:\Program Files (x86)\Steam\steamapps\common\7 Days To Die"
-```
-
-Copy the resulting `bin\SubLevelPhysics\SubLevelPhysics.dll` into the mod's `SubLevelPhysics` folder.
+- The MultiWorld context named `Sublevels` is the authoritative persistent block store.
+- One physical storage-world chunk is one cell: 16 × 16 horizontal blocks and the game's 256-block vertical range.
+- Each sublevel has an independent sparse logical X/Z cell grid. Logical coordinates are relative to the sublevel's pivot; physical coordinates identify chunks in the Sublevels world.
+- Cells are allocated as blocks are written. There is no fixed square footprint or per-sublevel guard region.
+- Verified-empty cells can be reclaimed and reused by any sublevel.
+- The primary world's `ChunkCluster` is not used to store sublevel blocks. Runtime projections are generated from detached cell snapshots and parented under a sublevel Rigidbody root.
+- Pose metadata is stored separately in the primary save as `sublevels-projections.xml`; block data and the cell ledger remain in the MultiWorld Sublevels save.
 
 ## Commands
 
-- `sl plot [sizeChunks] [block]` — create a sublevel at the next unused reserved chunk area. Default footprint is 3x3 chunks.
-- `sl plot <chunkX> <chunkZ> [sizeChunks] [block]` — create at explicit chunk coordinates.
-- `sl list` / `sl lists` / `sl plots` — list all sublevels, including their generated IDs, chunk allocation, world position, yaw, and physics state.
-- `sl select <id>` — select a sublevel for tools that operate on the selected instance.
-- `sl here <id>` — place that sublevel in front of the player.
-- `sl pose <id> <x> <y> <z> [yaw]` — set its world pose.
-- `sl move <id> <vx> <vy> <vz>` — set velocity in metres/second.
-- `sl move <id> (x,y,z) <speed>` — move along a direction at the requested speed.
-- `sl spin <id> <degreesPerSecond>` — set scripted yaw rate.
-- `sl physics <id> true|false` — toggle dynamic Rigidbody physics on exactly that sublevel.
-- `sl ride [true|false]` — show or toggle player riding (see below).
-- `sl set <id> <block> <dx> <dy> <dz> [rotation]` — place a block relative to that sublevel's pivot.
-- `sl status [id]` — list sublevels, or inspect the requested one.
-- `sl mat <id>` — dump materials for that sublevel.
-- `sl delete <id>` — delete only the requested sublevel.
+The command is available as either `sl` or `sublevel` in the F1 console.
 
-All per-sublevel modification commands require an explicit ID. There is no implicit all-sublevels physics toggle or delete-all command. Use `sl list` to discover IDs.
+```text
+sl plot [block]
+sl list
+sl select <id>
+sl here <id>
+sl pose <id> <x> <y> <z> [yaw]
+sl move <id> <vx> <vy> <vz>
+sl move <id> (x,y,z) <speed>
+sl spin <id> <degreesPerSecond>
+sl physics <id> true|false
+sl set <id> <block|air> <x> <yOffset> <z> [rotation]
+sl status [id]
+sl mat <id>
+sl delete <id>
+```
 
-## Allocation behavior
+`sl plot` creates a small 3×3 starter platform plus a centre pillar, then places it in front of the local player when one is available. On a dedicated server, use `sl pose` to position it.
 
-Automatic creation scans outward from the reserved starting chunk coordinate (4000,4000), checking the entire visible and support-chunk footprint against the loaded chunk cluster and existing sublevels. Each instance receives a generated eight-character ID. Explicit coordinates remain available for advanced use.
+`sl set` uses logical block coordinates relative to the sublevel pivot. X and Z may be negative. The Y argument is an offset from pivot Y=100; writable offsets are -99 through 154. For example:
 
-## Notes
+```text
+sl set ab12cd34 cobblestoneShapes:cube 16 0 0
+sl set ab12cd34 cobblestoneShapes:cube -16 0 0
+```
 
-The project must be compiled against the installed game's Managed assemblies. This source package has not been compiled or exercised in-game in this environment. Back up the world before testing mod builds that create or remove chunk data.
+These writes cross into logical cells `(1,0)` and `(-1,0)` respectively. Allocation is automatic. `sl status <id>` shows each logical-to-physical mapping.
 
-## Collision rollback
+The legacy numeric `sl plot <sizeChunks>` argument is accepted only for command compatibility; it no longer reserves a fixed footprint. Cells are allocated on demand.
 
-The kinematic one-way collision model introduced after Alpha 1.0 made sublevels fall through terrain (kinematic bodies do not collide with static terrain colliders). `PlotDriver` physics and the Physics Staff are restored to the Alpha 1.0 dynamic-Rigidbody behavior; commands, multi-sublevel support and persistence are unchanged. The layer-16 collision-matrix override is now reference-counted so several physics sublevels can coexist.
+## Projection implementation in this phase
 
-## Player riding
+- Each logical cell gets its own runtime GameObject beneath the sublevel root.
+- Per-cell `VoxelMesh` instances are built from the stored `BlockValue` snapshots using the game's block-shape rendering path and `MeshDescription` materials.
+- Per-cell collision meshes are built from the collision vertices generated by the same block-shape rendering calls. They are non-convex colliders and therefore remain under a kinematic Rigidbody.
+- Scripted translation and yaw rotation are supported. The root is registered with the game's floating-origin system.
+- Rebuilding after `sl set` replaces the runtime projection from authoritative storage snapshots.
 
-Standing on a sublevel carries the local player with it, including yaw (the camera turns with the sublevel), and stepping or jumping off hands over the sublevel's momentum. This arms the UFPS moving-platform support already inside `vp_FPController` (dormant in 7DTD because it only triggers for layer 28 ground) by pointing its `m_Platform` at the sublevel root when the ground belongs to a sublevel. See `src/PlatformRiding.cs`. Use `sl ride false` to disable it for comparison. `sl list` flags the sublevel the player is on.
+The initial renderer currently renders each block's full shape. It does not yet reproduce all of MeshGenerator's neighbor-face culling, lighting interpolation, water surface generation, foliage decoration, or chunk LOD behavior. Some transparent, liquid, terrain, or model-entity blocks may render incorrectly or be omitted. Projection rebuilding is synchronous and intended for small test builds, not large ships yet.
 
-Known limits: local player only (other entities and remote players are not carried); third-person orbit camera does not rotate with the sublevel; between physics ticks the player is not interpolated with the sublevel, so very fast sublevels may show slight visual jitter.
+## Installation and build
+
+1. Install MultiWorld 0.7.14 and configure a separate `Sublevels` world as described in `Config/multiworldserverconfig.Sublevels.example.xml`.
+2. Keep the Sublevels world out of portal/world-transfer destination lists.
+3. Back up any existing test save. Existing 0.4 ledgers are read by the 0.5 storage code; no physical cell relocation is performed.
+4. Build from this folder:
+
+```powershell
+dotnet build .\SubLevelPhysics.csproj -p:GameDir="D:\Steam\steamapps\common\7 Days to Die"
+```
+
+5. The project now copies `ModInfo.xml`, `Config`, and `README.md` into `bin\SubLevelPhysics\`. Copy that complete output folder into the server's `Mods` directory. Do not copy only the DLL.
+6. Start a server-authoritative session. Dedicated servers and single-player/listen-server hosts are supported if MultiWorld exposes the `Sublevels` context. Remote clients do not initialize the authoritative storage backend.
+7. Check the log for `Sublevels storage world ready` and then use `sl plot` in the F1 console.
+
+## Suggested first test
+
+1. Run `sl plot` and record the generated ID.
+2. Run `sl status <id>`. The starter platform should occupy one logical cell and show its physical storage chunk.
+3. Run `sl set <id> cobblestoneShapes:cube 16 0 0`, then `sl status <id>`. A second logical cell `(1,0)` should appear.
+4. Run `sl set <id> cobblestoneShapes:cube -16 0 0`. A third logical cell `(-1,0)` should appear.
+5. Run `sl pose <id> <x> <y> <z> 0` and `sl move <id> 1 0 0` to test scripted movement; use `sl move <id> 0 0 0` to stop.
+6. Restart the session and verify that the projection pose and logical-cell mappings restore.
+7. In a disposable save, clear every block in a cell with `sl set <id> air <x> <yOffset> <z>`, then inspect whether the empty cell can be reclaimed. `sl delete` refuses to remove sublevels with non-empty cells or unverified payload data.
+
+## Known limitations / not yet ported
+
+1. **Player placement and breaking:** not yet routed into `SublevelStorageApi`. Use `sl set` for block edits in this phase. The original `World.SetBlock` and `ChunkCluster.SetBlock` patches cannot be reused as-is because they would write static block data into the primary world.
+2. **Tile entities and block-entity models:** not projected or serialized through logical cell coordinates. Avoid crates, workstations, doors, vehicles, powered blocks, and other blocks requiring persistent entity payloads during tests.
+3. **Dynamic Rigidbody physics:** not enabled. The current colliders are non-convex per-cell meshes; dynamic physics requires the original block-shape decomposition pipeline to be adapted to snapshots.
+4. **Player platform riding / physics staff:** not yet ported.
+5. **Multiplayer projection replication:** not implemented. This phase builds projections in the authoritative process only. It is suitable for single-player/listen-server validation and server-side storage command tests, not remote-client visual synchronization.
+6. **Rendering parity:** this first projection builder does not reproduce all vanilla chunk meshing, face culling, lighting, water, decorations, LOD, or model-entity paths. Large builds will also need incremental/asynchronous rebuilds.
+7. **Complete storage simulation isolation:** water simulation, entity scheduling, random ticks, world-time systems, and third-party hooks remain unverified. Dense adjacent cells must not be considered production-safe until these paths are tested.
+8. **Build/runtime verification:** this source package has not been compiled in this environment because the .NET SDK and local game installation are unavailable. Your local compile is the authoritative compile check; runtime behavior still needs testing.

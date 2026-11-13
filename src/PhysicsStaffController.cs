@@ -16,15 +16,15 @@ namespace SubLevelPhysics
 
 		private void Update()
 		{
-			Plot plot = PlotSpace.Current;
-			EntityPlayerLocal player = GameManager.Instance != null && GameManager.Instance.World != null
-				? GameManager.Instance.World.GetPrimaryPlayer() : null;
+			SublevelPlot plot = PlotSpace.Current;
+			EntityPlayerLocal player = PlotSpace.PrimaryWorld != null
+				? PlotSpace.PrimaryWorld.GetPrimaryPlayer() : null;
 
 			// The staff is a development tool exposed in CreativeMode=All. Do not gate it
 			// on IsAdmin: single-player creative users and server hosts can have different
 			// admin flags even though they are legitimately testing their own plot.
 			// Each sublevel has its own staff component; only the selected sublevel's component may act.
-			bool authorized = plot != null && plot.RootGo != null && plot.RootGo.transform == transform && plot.Driver != null && plot.Driver.PhysicsEnabled &&
+			bool authorized = plot != null && plot.Root != null && plot.Root.transform == transform && plot.Driver != null && plot.Driver.PhysicsEnabled &&
 				player != null && IsHoldingStaff(player);
 
 			if (!authorized)
@@ -61,7 +61,7 @@ namespace SubLevelPhysics
 			return item != null && item.Name == StaffItemName;
 		}
 
-		private void TryBeginGrab(Plot plot, Camera cam)
+		private void TryBeginGrab(SublevelPlot plot, Camera cam)
 		{
 			Ray ray = cam.ScreenPointToRay(Input.mousePosition);
 			RaycastHit hit;
